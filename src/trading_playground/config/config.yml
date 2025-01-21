@@ -1,0 +1,23 @@
+# src/trading_playground/config/config.yml
+database:
+  host: "localhost"
+  port: 5432
+  database: "trading_system"
+  user: "whitneywalters"
+  password: null # Will be overridden by environment variable
+
+alpaca:
+  api_key: "" # Will be overridden by environment variable
+  api_secret: "" # Will be overridden by environment variable
+  paper_trading: true
+  base_url: "https://paper-api.alpaca.markets"
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  handlers:
+    console:
+      type: "console"
+    file:
+      type: "file"
+      filename: "logs/trading_system.log"
