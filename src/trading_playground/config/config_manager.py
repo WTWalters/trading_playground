@@ -16,9 +16,6 @@ class DatabaseConfig(BaseModel):
     user: str = Field(default="postgres", description="Database user")
     password: Optional[SecretStr] = Field(default=None, description="Database password")
 
-    class Config:
-        frozen = True
-
 
 class AlpacaConfig(BaseModel):
     """Alpaca API configuration settings."""
@@ -30,9 +27,6 @@ class AlpacaConfig(BaseModel):
         "https://paper-api.alpaca.markets",
         description="API base URL"
     )
-
-    class Config:
-        frozen = True
 
 
 class LoggingConfig(BaseModel):
@@ -53,9 +47,6 @@ class LoggingConfig(BaseModel):
         }
     )
 
-    class Config:
-        frozen = True
-
 
 class TradingConfig(BaseModel):
     """Main configuration container."""
@@ -63,9 +54,6 @@ class TradingConfig(BaseModel):
     database: DatabaseConfig
     alpaca: AlpacaConfig
     logging: LoggingConfig
-
-    class Config:
-        frozen = True
 
 
 class ConfigurationError(Exception):
@@ -82,6 +70,7 @@ class ConfigManager:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            cls._instance._config = None
         return cls._instance
 
     def __init__(self):
@@ -132,7 +121,7 @@ class ConfigManager:
 
         return env_config
 
-    def _load_config(self):
+    def _load_config(self) -> None:
         """Load configuration from files and environment variables."""
         try:
             config_path = self._get_config_path()
@@ -156,6 +145,8 @@ class ConfigManager:
     @property
     def config(self) -> TradingConfig:
         """Get the configuration."""
+        if self._config is None:
+            self._load_config()
         return self._config
 
     def reload(self):
