@@ -4,11 +4,11 @@ database:
   port: 5432
   database: "trading_system"
   user: "whitneywalters"
-  password: null # Will be overridden by environment variable
+  password: null
 
 alpaca:
-  api_key: "" # Will be overridden by environment variable
-  api_secret: "" # Will be overridden by environment variable
+  api_key: "default_key" # Changed from empty string
+  api_secret: "default_secret" # Changed from empty string
   paper_trading: true
   base_url: "https://paper-api.alpaca.markets"
 
