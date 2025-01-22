@@ -71,11 +71,13 @@ class ConfigManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._config = None
+            cls._instance._last_env_vars = None
         return cls._instance
 
     def __init__(self):
         if not hasattr(self, '_config'):
             self._config = None
+            self._last_env_vars = None
             self._load_config()
 
     def _get_config_path(self) -> Path:
@@ -98,6 +100,13 @@ class ConfigManager:
 
         raise ConfigurationError("No configuration file found")
 
+    def _get_env_snapshot(self) -> Dict[str, str]:
+        """Get a snapshot of relevant environment variables."""
+        return {
+            k: v for k, v in os.environ.items() 
+            if k.startswith(self.ENV_PREFIX)
+        }
+
     def _load_env_variables(self) -> Dict[str, Any]:
         """Load configuration from environment variables."""
         # Load .env file if it exists
@@ -106,18 +115,20 @@ class ConfigManager:
             load_dotenv(dotenv_path)
 
         env_config = {}
-        for key, value in os.environ.items():
-            if key.startswith(self.ENV_PREFIX):
-                # Remove prefix and convert to lowercase
-                clean_key = key[len(self.ENV_PREFIX):].lower()
-                # Split by double underscore for nested configs
-                parts = clean_key.split('__')
+        # Update last environment snapshot
+        self._last_env_vars = self._get_env_snapshot()
 
-                # Build nested dictionary
-                current = env_config
-                for part in parts[:-1]:
-                    current = current.setdefault(part, {})
-                current[parts[-1]] = value
+        for key, value in self._last_env_vars.items():
+            # Remove prefix and convert to lowercase
+            clean_key = key[len(self.ENV_PREFIX):].lower()
+            # Split by double underscore for nested configs
+            parts = clean_key.split('__')
+
+            # Build nested dictionary
+            current = env_config
+            for part in parts[:-1]:
+                current = current.setdefault(part, {})
+            current[parts[-1]] = value
 
         return env_config
 
@@ -142,10 +153,17 @@ class ConfigManager:
         except Exception as e:
             raise ConfigurationError(f"Failed to load configuration: {str(e)}")
 
+    def _should_reload(self) -> bool:
+        """Check if configuration should be reloaded due to environment changes."""
+        if self._last_env_vars is None:
+            return True
+        current_env = self._get_env_snapshot()
+        return current_env != self._last_env_vars
+
     @property
     def config(self) -> TradingConfig:
         """Get the configuration."""
-        if self._config is None:
+        if self._config is None or self._should_reload():
             self._load_config()
         return self._config
 
