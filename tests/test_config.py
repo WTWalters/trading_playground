@@ -4,8 +4,35 @@ from pathlib import Path
 from trading_playground.config.config_manager import (
     ConfigManager,
     get_config,
-    ConfigurationError
+    ConfigurationError,
+    config_manager
 )
+
+
+def reset_config():
+    """Reset the configuration singleton."""
+    ConfigManager._instance = None
+    if hasattr(config_manager, '_config'):
+        config_manager._config = None
+
+
+@pytest.fixture(autouse=True)
+def clean_environment():
+    """Clean up environment variables before and after each test."""
+    # Store original environment
+    original_env = {k: v for k, v in os.environ.items()}
+    
+    # Reset configuration
+    reset_config()
+    
+    yield
+    
+    # Restore original environment
+    os.environ.clear()
+    os.environ.update(original_env)
+    
+    # Reset configuration again
+    reset_config()
 
 
 @pytest.fixture
@@ -30,9 +57,15 @@ logging:
 @pytest.fixture
 def env_vars():
     """Set up test environment variables."""
+    # Reset configuration first
+    reset_config()
+    
+    # Set test environment variables
     os.environ["TRADING_DATABASE__HOST"] = "testhost"
     os.environ["TRADING_ALPACA__API_KEY"] = "env_test_key"
+    
     yield
+    
     # Clean up
     del os.environ["TRADING_DATABASE__HOST"]
     del os.environ["TRADING_ALPACA__API_KEY"]
