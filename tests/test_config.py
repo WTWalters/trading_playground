@@ -63,7 +63,10 @@ def env_vars():
     # Set test environment variables
     os.environ["TRADING_DATABASE__HOST"] = "testhost"
     os.environ["TRADING_ALPACA__API_KEY"] = "env_test_key"
+<<<<<<< HEAD
     os.environ["TRADING_ALPACA__API_SECRET"] = "env_test_secret"  # Added missing required field
+=======
+>>>>>>> fix/config-tests-env-handling
     
     yield
     
