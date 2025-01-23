@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from data_ingestion.validation import DataValidator
+from trading_playground.data_ingestion.orchestrator import DataOrchestrator, DataIngestionConfig
 
 @pytest.fixture
 def validator():

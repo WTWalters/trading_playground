@@ -1,9 +1,9 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import asyncio
 import logging
 from datetime import datetime, timedelta
 import pandas as pd
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 import asyncpg
 
 from .data_providers import DataProvider, YahooFinanceProvider, PolygonProvider
@@ -11,17 +11,19 @@ from .db_manager import DatabaseManager
 from .validation import DataValidator
 
 class DataIngestionConfig(BaseModel):
-    """Configuration for data ingestion"""
+    model_config = {
+        "arbitrary_types_allowed": True
+    }
     symbols: List[str]
     timeframes: List[str]
     providers: List[str]
     start_date: datetime
     end_date: Optional[datetime]
-    validation_rules: Dict[str, any]
+    validation_rules: Dict[str, Any]  # Changed from any to Any
     retry_attempts: int = 3
     retry_delay: int = 5
 
-    @validator('timeframes')
+    @field_validator('timeframes')
     def validate_timeframes(cls, v):
         valid_timeframes = ['1m', '5m', '15m', '30m', '1h', '4h', '1d']
         for tf in v:

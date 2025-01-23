@@ -135,3 +135,15 @@ async def test_error_handling(config, mock_db_manager):
     assert len(results['successful']) == 0
     assert len(results['failed']) > 0
     assert results['total_records'] == 0
+
+
+def test_validate_market_data(validator, valid_data):
+    # Add debug logging
+    result = validator.validate_market_data(valid_data)
+    print("Validation result:", result)
+    print("Price consistency:", validator._validate_price_consistency(valid_data))
+    print("Timestamps:", validator._validate_timestamps(valid_data))
+    print("Gaps:", validator._validate_gaps(valid_data))
+    print("Outliers:", validator._validate_outliers(valid_data))
+
+    assert validator.validate_market_data(valid_data) is True
