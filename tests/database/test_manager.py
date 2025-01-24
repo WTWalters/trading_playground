@@ -1,5 +1,6 @@
 """Tests for database manager implementation."""
 import pytest
+import pytest_asyncio
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -19,7 +20,7 @@ def db_config():
         max_connections=5
     )
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def db_manager(db_config):
     """Database manager fixture."""
     manager = DatabaseManager(db_config)
