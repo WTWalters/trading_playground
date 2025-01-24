@@ -3,6 +3,7 @@ from typing import Dict, Optional, Tuple
 import logging
 from datetime import datetime
 import pandas as pd
+import pytz
 import asyncpg
 from asyncpg import Pool
 from ..config.db_config import DatabaseConfig
@@ -100,18 +101,22 @@ class DatabaseManager:
         interval = interval_map.get(timeframe, '1 day')
         
         try:
+            # Ensure timestamps are timezone-aware
+            if data.index.tz is None:
+                data.index = data.index.tz_localize('UTC')
+            
             # Prepare data for insertion
             records = [
                 (
-                    index,          # time
-                    symbol,         # symbol
-                    row['open'],    # open
-                    row['high'],    # high
-                    row['low'],     # low
-                    row['close'],   # close
-                    int(row['volume']), # volume
-                    source,         # source
-                    interval        # timeframe
+                    index.to_pydatetime(),  # Already timezone-aware now
+                    symbol,
+                    row['open'],
+                    row['high'],
+                    row['low'],
+                    row['close'],
+                    int(row['volume']),
+                    source,
+                    interval
                 )
                 for index, row in data.iterrows()
             ]
@@ -152,6 +157,12 @@ class DatabaseManager:
     ) -> pd.DataFrame:
         """Retrieve market data from the database."""
         try:
+            # Ensure dates are timezone-aware
+            if start_date.tzinfo is None:
+                start_date = pytz.UTC.localize(start_date)
+            if end_date.tzinfo is None:
+                end_date = pytz.UTC.localize(end_date)
+            
             query = """
                 SELECT time, open, high, low, close, volume
                 FROM market_data
