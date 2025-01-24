@@ -1,7 +1,7 @@
 """Database manager module for market data storage and retrieval."""
 from typing import Dict, Optional, Tuple
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 import pandas as pd
 import pytz
 import asyncpg
@@ -38,14 +38,19 @@ class DatabaseManager:
     async def _create_schema(self) -> None:
         """Create necessary database schema if not exists."""
         async with self.pool.acquire() as conn:
+            # Drop the existing table and recreate it
+            await conn.execute("""
+                DROP TABLE IF EXISTS market_data CASCADE;
+            """)
+            
             # Create the TimescaleDB extension
             await conn.execute(
-                "CREATE EXTENSION IF NOT EXISTS timescaledb;"
+                "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
             )
             
             # Create market data table
             await conn.execute("""
-                CREATE TABLE IF NOT EXISTS market_data (
+                CREATE TABLE market_data (
                     time        TIMESTAMPTZ NOT NULL,
                     symbol      TEXT NOT NULL,
                     open        DOUBLE PRECISION,
@@ -57,7 +62,7 @@ class DatabaseManager:
                     timeframe   INTERVAL NOT NULL,
                     created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                     updated_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE (time, symbol)
+                    CONSTRAINT market_data_pkey PRIMARY KEY (time, symbol)
                 );
             """)
             
@@ -65,7 +70,8 @@ class DatabaseManager:
             await conn.execute("""
                 SELECT create_hypertable(
                     'market_data', 'time',
-                    if_not_exists => TRUE
+                    if_not_exists => TRUE,
+                    migrate_data => TRUE
                 );
             """)
             
@@ -133,7 +139,7 @@ class DatabaseManager:
                 ) VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8, {interval}
                 )
-                ON CONFLICT (time, symbol) DO UPDATE
+                ON CONFLICT ON CONSTRAINT market_data_pkey DO UPDATE
                 SET 
                     open = EXCLUDED.open,
                     high = EXCLUDED.high,
