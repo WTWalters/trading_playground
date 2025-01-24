@@ -7,7 +7,6 @@ import aiohttp
 import asyncio
 import logging
 from polygon import RESTClient
-from polygon.rest.aggs import GroupedDaily
 
 class DataProvider(ABC):
     """Abstract base class for market data providers"""
@@ -22,15 +21,6 @@ class DataProvider(ABC):
     ) -> pd.DataFrame:
         """
         Fetch historical OHLCV data for a given symbol
-        
-        Args:
-            symbol: Ticker symbol
-            start_date: Start date for historical data
-            end_date: End date (optional, None for latest)
-            timeframe: Data timeframe (e.g., '1d', '1h')
-            
-        Returns:
-            DataFrame with OHLCV data
         """
         pass
 
@@ -66,7 +56,6 @@ class YahooFinanceProvider(DataProvider):
             interval = self._convert_timeframe(timeframe)
             ticker = yf.Ticker(symbol)
             
-            # Use end_date if provided, otherwise fetch to latest
             df = await asyncio.to_thread(
                 ticker.history,
                 start=start_date,
@@ -74,7 +63,6 @@ class YahooFinanceProvider(DataProvider):
                 interval=interval
             )
             
-            # Standardize column names
             df.columns = [col.lower() for col in df.columns]
             required_cols = ['open', 'high', 'low', 'close', 'volume']
             
@@ -95,7 +83,7 @@ class PolygonProvider(DataProvider):
         self.client = RESTClient(api_key)
         self.logger = logging.getLogger(__name__)
         
-    def _convert_timeframe(self, timeframe: str) -> str:
+    def _convert_timeframe(self, timeframe: str) -> tuple[str, str]:
         """Convert standard timeframe to Polygon multiplier/timespan"""
         conversions = {
             '1m': ('1', 'minute'),
@@ -120,7 +108,6 @@ class PolygonProvider(DataProvider):
         try:
             multiplier, timespan = self._convert_timeframe(timeframe)
             
-            # Fetch data
             aggs = []
             for agg in self.client.list_aggs(
                 symbol,
