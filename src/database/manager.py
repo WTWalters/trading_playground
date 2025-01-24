@@ -1,7 +1,7 @@
 """Database manager module for market data storage and retrieval."""
 from typing import Dict, Optional, Tuple
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 import pytz
 import asyncpg
@@ -56,7 +56,8 @@ class DatabaseManager:
                     source      TEXT NOT NULL,
                     timeframe   INTERVAL NOT NULL,
                     created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                    updated_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                    updated_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (time, symbol)
                 );
             """)
             
@@ -76,6 +77,20 @@ class DatabaseManager:
                 CREATE INDEX IF NOT EXISTS idx_market_data_source 
                 ON market_data (source);
             """)
+
+    def _get_interval(self, timeframe: str) -> str:
+        """Convert timeframe to PostgreSQL interval."""
+        # Map timeframes to PostgreSQL interval strings
+        interval_map = {
+            '1m': 'INTERVAL \'1 minute\'',
+            '5m': 'INTERVAL \'5 minutes\'',
+            '15m': 'INTERVAL \'15 minutes\'',
+            '30m': 'INTERVAL \'30 minutes\'',
+            '1h': 'INTERVAL \'1 hour\'',
+            '4h': 'INTERVAL \'4 hours\'',
+            '1d': 'INTERVAL \'1 day\''
+        }
+        return interval_map.get(timeframe, 'INTERVAL \'1 day\'')
             
     async def store_market_data(
         self,
@@ -88,59 +103,56 @@ class DatabaseManager:
         if data.empty:
             return
             
-        # Convert timeframe string to interval
-        interval_map = {
-            '1m': '1 minute',
-            '5m': '5 minutes',
-            '15m': '15 minutes',
-            '30m': '30 minutes',
-            '1h': '1 hour',
-            '4h': '4 hours',
-            '1d': '1 day'
-        }
-        interval = interval_map.get(timeframe, '1 day')
-        
         try:
             # Ensure timestamps are timezone-aware
             if data.index.tz is None:
                 data.index = data.index.tz_localize('UTC')
             
-            # Prepare data for insertion
-            records = [
-                (
-                    index.to_pydatetime(),  # Already timezone-aware now
-                    symbol,
-                    row['open'],
-                    row['high'],
-                    row['low'],
-                    row['close'],
-                    int(row['volume']),
-                    source,
-                    interval
+            # Get interval for timeframe
+            interval = self._get_interval(timeframe)
+            
+            # The actual interval will be created by PostgreSQL
+            values_list = []
+            for idx, row in data.iterrows():
+                values_list.extend([
+                    idx.to_pydatetime(),  # time
+                    symbol,               # symbol
+                    row['open'],          # open
+                    row['high'],          # high
+                    row['low'],           # low
+                    row['close'],         # close
+                    int(row['volume']),   # volume
+                    source,               # source
+                ])
+            
+            # Create the SQL query with parameterized interval
+            query = f"""
+                INSERT INTO market_data (
+                    time, symbol, open, high, low, close, 
+                    volume, source, timeframe
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, {interval}
                 )
-                for index, row in data.iterrows()
-            ]
+                ON CONFLICT (time, symbol) DO UPDATE
+                SET 
+                    open = EXCLUDED.open,
+                    high = EXCLUDED.high,
+                    low = EXCLUDED.low,
+                    close = EXCLUDED.close,
+                    volume = EXCLUDED.volume,
+                    source = EXCLUDED.source,
+                    timeframe = EXCLUDED.timeframe,
+                    updated_at = CURRENT_TIMESTAMP
+            """
             
             async with self.pool.acquire() as conn:
-                await conn.executemany("""
-                    INSERT INTO market_data (
-                        time, symbol, open, high, low, close, 
-                        volume, source, timeframe
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                    ON CONFLICT (time, symbol) DO UPDATE
-                    SET 
-                        open = EXCLUDED.open,
-                        high = EXCLUDED.high,
-                        low = EXCLUDED.low,
-                        close = EXCLUDED.close,
-                        volume = EXCLUDED.volume,
-                        source = EXCLUDED.source,
-                        timeframe = EXCLUDED.timeframe,
-                        updated_at = CURRENT_TIMESTAMP
-                """, records)
+                # Execute the query for each record
+                await conn.executemany(query, [
+                    values_list[i:i+8] for i in range(0, len(values_list), 8)
+                ])
                 
             self.logger.info(
-                f"Stored {len(records)} records for {symbol} ({timeframe})"
+                f"Stored {len(data)} records for {symbol} ({timeframe})"
             )
             
         except Exception as e:
@@ -163,11 +175,15 @@ class DatabaseManager:
             if end_date.tzinfo is None:
                 end_date = pytz.UTC.localize(end_date)
             
-            query = """
+            # Get interval for timeframe
+            interval = self._get_interval(timeframe)
+            
+            query = f"""
                 SELECT time, open, high, low, close, volume
                 FROM market_data
                 WHERE symbol = $1
                 AND time BETWEEN $2 AND $3
+                AND timeframe = {interval}
             """
             params = [symbol, start_date, end_date]
             
@@ -200,7 +216,10 @@ class DatabaseManager:
         try:
             async with self.pool.acquire() as conn:
                 records = await conn.fetch("""
-                    SELECT symbol, timeframe::text, MAX(time) as latest_time
+                    SELECT 
+                        symbol,
+                        timeframe::text as timeframe,
+                        MAX(time) as latest_time
                     FROM market_data
                     GROUP BY symbol, timeframe
                 """)
