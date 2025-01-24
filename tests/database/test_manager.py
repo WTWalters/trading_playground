@@ -37,7 +37,8 @@ def sample_data():
     dates = pd.date_range(
         start='2024-01-01',
         end='2024-01-10',
-        freq='1D'
+        freq='1D',
+        tz='UTC'
     )
     
     data = pd.DataFrame(index=dates)
@@ -50,6 +51,11 @@ def sample_data():
     # Ensure high is highest and low is lowest
     data['high'] = data[['open', 'high', 'close']].max(axis=1) + 0.1
     data['low'] = data[['open', 'low', 'close']].min(axis=1) - 0.1
+    
+    # Convert all numeric columns to float64
+    numeric_cols = ['open', 'high', 'low', 'close']
+    data[numeric_cols] = data[numeric_cols].astype('float64')
+    data['volume'] = data['volume'].astype('int64')
     
     return data
 
@@ -84,11 +90,17 @@ async def test_store_and_retrieve_market_data(db_manager, sample_data):
     assert not result.empty
     assert len(result) == len(sample_data)
     pd.testing.assert_index_equal(result.index, sample_data.index)
-    pd.testing.assert_series_equal(
-        result['close'],
-        sample_data['close'],
-        check_names=False
-    )
+    
+    # Compare each column individually with less strict tolerances
+    for col in ['open', 'high', 'low', 'close', 'volume']:
+        pd.testing.assert_series_equal(
+            result[col],
+            sample_data[col],
+            check_names=False,
+            check_freq=False,  # Don't check frequency
+            rtol=1e-12,      # Relative tolerance
+            atol=1e-12       # Absolute tolerance
+        )
 
 @pytest.mark.asyncio
 async def test_get_latest_dates(db_manager, sample_data):
@@ -154,12 +166,14 @@ async def test_different_timeframes(db_manager):
     
     for timeframe in timeframes:
         # Create sample data with appropriate frequency
+        freq = timeframe[:-1] + ('T' if timeframe.endswith('m') else 
+              'h' if timeframe.endswith('h') else 'D')
+        
         dates = pd.date_range(
             start='2024-01-01',
             end='2024-01-02',
-            freq=timeframe[:-1] + 'min' if timeframe.endswith('m')
-            else timeframe[:-1] + 'H' if timeframe.endswith('h')
-            else 'D'
+            freq=freq,
+            tz='UTC'
         )
         
         data = pd.DataFrame({
@@ -173,6 +187,11 @@ async def test_different_timeframes(db_manager):
         # Ensure high is highest and low is lowest
         data['high'] = data[['open', 'high', 'close']].max(axis=1) + 0.1
         data['low'] = data[['open', 'low', 'close']].min(axis=1) - 0.1
+        
+        # Convert numeric columns
+        numeric_cols = ['open', 'high', 'low', 'close']
+        data[numeric_cols] = data[numeric_cols].astype('float64')
+        data['volume'] = data['volume'].astype('int64')
         
         # Store data
         await db_manager.store_market_data(
@@ -193,6 +212,17 @@ async def test_different_timeframes(db_manager):
         
         assert not result.empty
         assert len(result) == len(data)
+        
+        # Compare data with less strict tolerances
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            pd.testing.assert_series_equal(
+                result[col],
+                data[col],
+                check_names=False,
+                check_freq=False,
+                rtol=1e-12,
+                atol=1e-12
+            )
 
 @pytest.mark.asyncio
 async def test_handle_empty_data(db_manager):
@@ -257,8 +287,12 @@ async def test_data_upsert(db_manager, sample_data):
         source
     )
     
+    # Compare with less strict tolerances
     pd.testing.assert_series_equal(
         result['close'],
         modified_data['close'],
-        check_names=False
+        check_names=False,
+        check_freq=False,
+        rtol=1e-12,
+        atol=1e-12
     )
