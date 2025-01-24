@@ -123,10 +123,10 @@ class DatabaseManager:
                 values_list.extend([
                     idx.to_pydatetime(),  # time
                     symbol,               # symbol
-                    row['open'],          # open
-                    row['high'],          # high
-                    row['low'],           # low
-                    row['close'],         # close
+                    float(row['open']),   # open
+                    float(row['high']),   # high
+                    float(row['low']),    # low
+                    float(row['close']),  # close
                     int(row['volume']),   # volume
                     source,               # source
                 ])
@@ -210,7 +210,16 @@ class DatabaseManager:
                 records,
                 columns=['time', 'open', 'high', 'low', 'close', 'volume']
             )
+            # Convert timezone-aware timestamps to match input
             df.set_index('time', inplace=True)
+            df.index = pd.DatetimeIndex(df.index).tz_convert('UTC')
+            df.index.name = None  # Remove index name to match sample data
+            
+            # Convert numeric columns
+            numeric_cols = ['open', 'high', 'low', 'close', 'volume']
+            for col in numeric_cols:
+                df[col] = pd.to_numeric(df[col])
+            
             return df
             
         except Exception as e:
