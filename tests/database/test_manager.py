@@ -13,8 +13,8 @@ def db_config():
         host='localhost',
         port=5432,
         database='trading_test',  # Use test database
-        user='postgres',
-        password='postgres',
+        user='whitneywalters',    # Your local username
+        password='',              # Empty password
         min_connections=1,
         max_connections=5
     )
@@ -24,9 +24,11 @@ async def db_manager(db_config):
     """Database manager fixture."""
     manager = DatabaseManager(db_config)
     await manager.initialize()
-    yield manager
-    await manager.cleanup_old_data(0)  # Clean up test data
-    await manager.close()
+    try:
+        yield manager
+    finally:
+        await manager.cleanup_old_data(0)  # Clean up test data
+        await manager.close()
 
 @pytest.fixture
 def sample_data():
