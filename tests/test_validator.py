@@ -21,13 +21,20 @@ def valid_data():
 @pytest.fixture
 def sample_data():
     dates = pd.date_range(start='2024-01-01', end='2024-01-10', freq='1D')
-    return pd.DataFrame({
-        'open': np.random.randn(len(dates)) + 100,
-        'high': np.random.randn(len(dates)) + 101,
-        'low': np.random.randn(len(dates)) + 99,
-        'close': np.random.randn(len(dates)) + 100,
-        'volume': np.random.randint(1000, 10000, len(dates))
-    }, index=dates)
+    base_prices = 100 + np.random.randn(len(dates)) * 0.5  # Base price for each day
+    
+    data = pd.DataFrame(index=dates)
+    data['open'] = base_prices
+    data['high'] = base_prices + abs(np.random.randn(len(dates))) * 0.5  # Ensure high > open
+    data['low'] = base_prices - abs(np.random.randn(len(dates))) * 0.5   # Ensure low < open
+    data['close'] = base_prices + np.random.randn(len(dates)) * 0.3      # Close around base
+    
+    # Ensure high is highest and low is lowest
+    data['high'] = data[['high', 'open', 'close']].max(axis=1) + 0.1
+    data['low'] = data[['low', 'open', 'close']].min(axis=1) - 0.1
+    
+    data['volume'] = np.random.randint(1000, 10000, len(dates))
+    return data
 
 @pytest.fixture
 def validator():
