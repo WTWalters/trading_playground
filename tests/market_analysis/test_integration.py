@@ -1,4 +1,4 @@
-# src/market_analysis/tests/test_integration.py
+# tests/market_analysis/test_integration.py
 
 import pytest
 import pandas as pd
@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from src.market_analysis.base import AnalysisConfig, MarketRegime
 from src.market_analysis.volatility import VolatilityAnalyzer
 from src.market_analysis.trend import TrendAnalyzer
-from ..patterns import PatternAnalyzer
+from src.market_analysis.patterns import PatternAnalyzer  # Fixed import
 
 @pytest.fixture
 def sample_data():

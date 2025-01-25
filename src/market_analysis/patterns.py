@@ -7,113 +7,135 @@ import talib
 from .base import MarketAnalyzer, AnalysisConfig
 
 class PatternAnalyzer(MarketAnalyzer):
-   """Detects candlestick and chart patterns"""
+    """Detects candlestick and chart patterns"""
 
-   def __init__(self, config: AnalysisConfig):
-       super().__init__(config)
-       self.pattern_functions = {
-           'DOJI': talib.CDLDOJI,
-           'ENGULFING': talib.CDLENGULFING,
-           'HAMMER': talib.CDLHAMMER,
-           'SHOOTING_STAR': talib.CDLSHOOTINGSTAR,
-           'MORNING_STAR': talib.CDLMORNINGSTAR,
-           'EVENING_STAR': talib.CDLEVENINGSTAR,
-           'THREE_WHITE_SOLDIERS': talib.CDL3WHITESOLDIERS,
-           'THREE_BLACK_CROWS': talib.CDL3BLACKCROWS
-       }
+    def __init__(self, config: AnalysisConfig):
+        """
+        Initialize pattern analyzer with specific configuration
 
-   async def analyze(
-       self,
-       data: pd.DataFrame,
-       additional_metrics: Optional[Dict] = None
-   ) -> Dict[str, Union[float, str, pd.Series, List[Dict]]]:
-       """Detect chart patterns"""
-       if not self._validate_input(data):
-           return {}
+        Args:
+            config: Configuration parameters for analysis
+        """
+        super().__init__(config)
+        self.config.minimum_data_points = 5  # Override minimum data points for patterns
+        self.pattern_functions = {
+            'DOJI': talib.CDLDOJI,
+            'ENGULFING': talib.CDLENGULFING,
+            'HAMMER': talib.CDLHAMMER,
+            'SHOOTING_STAR': talib.CDLSHOOTINGSTAR,
+            'MORNING_STAR': talib.CDLMORNINGSTAR,
+            'EVENING_STAR': talib.CDLEVENINGSTAR
+        }
 
-       try:
-           patterns = {}
-           recent_patterns = []
-           lookback = 5  # Check last 5 bars for recent patterns
+    async def analyze(
+        self,
+        data: pd.DataFrame,
+        additional_metrics: Optional[Dict] = None
+    ) -> Dict[str, Union[Dict, List, pd.Series]]:
+        """
+        Detect chart patterns
 
-           for name, func in self.pattern_functions.items():
-               pattern = pd.Series(
-                   func(
-                       data['open'].values,
-                       data['high'].values,
-                       data['low'].values,
-                       data['close'].values
-                   ),
-                   index=data.index
-               )
+        Args:
+            data: DataFrame with OHLCV data
+            additional_metrics: Optional dictionary of metrics from other analyzers
 
-               patterns[name] = pattern
+        Returns:
+            Dictionary containing detected patterns and success rates
+        """
+        if not self._validate_input(data):
+            return {}
 
-               # Check for recent pattern occurrences
-               recent_signals = pattern.tail(lookback)
-               if (recent_signals != 0).any():
-                   for idx, value in recent_signals.items():
-                       if value != 0:
-                           recent_patterns.append({
-                               'pattern': name,
-                               'date': idx,
-                               'signal': 'bullish' if value > 0 else 'bearish'
-                           })
+        try:
+            # Convert data to proper type
+            ohlc = data[['open', 'high', 'low', 'close']].astype(float)
 
-           # Calculate success rate if we have trend data
-           success_rates = {}
-           if additional_metrics and 'trend_analysis' in additional_metrics:
-               for name, pattern in patterns.items():
-                   success_rates[name] = self._calculate_pattern_success(
-                       pattern,
-                       data['close'],
-                       lookforward=10  # 10-bar forward returns
-                   )
+            patterns = {}
+            recent_patterns = []
+            success_rates = {}
 
-           return {
-               'patterns': patterns,
-               'recent_patterns': recent_patterns,
-               'success_rates': success_rates
-           }
+            for name, func in self.pattern_functions.items():
+                pattern = pd.Series(
+                    func(
+                        ohlc['open'].values,
+                        ohlc['high'].values,
+                        ohlc['low'].values,
+                        ohlc['close'].values
+                    ),
+                    index=data.index
+                )
 
-       except Exception as e:
-           self.logger.error(f"Pattern detection failed: {str(e)}")
-           return {}
+                patterns[name] = pattern
 
-   def _calculate_pattern_success(
-       self,
-       pattern: pd.Series,
-       prices: pd.Series,
-       lookforward: int = 10
-   ) -> Dict[str, float]:
-       """Calculate pattern success rates"""
-       try:
-           bullish_signals = pattern > 0
-           bearish_signals = pattern < 0
+                # Check for recent pattern occurrences
+                recent_signals = pattern.tail(5)
+                for idx, value in recent_signals.items():
+                    if value != 0:
+                        recent_patterns.append({
+                            'pattern': name,
+                            'date': idx,
+                            'signal': 'bullish' if value > 0 else 'bearish'
+                        })
 
-           # Calculate forward returns
-           forward_returns = prices.shift(-lookforward) / prices - 1
+                # Calculate success rates if we have trend data
+                if additional_metrics and 'trend_analysis' in additional_metrics:
+                    success_rates[name] = self._calculate_pattern_success(
+                        pattern,
+                        ohlc['close'],
+                        lookforward=10
+                    )
 
-           # Calculate success rates
-           bullish_success = (
-               (forward_returns[bullish_signals] > 0).sum() /
-               bullish_signals.sum() if bullish_signals.any() else 0
-           )
-           bearish_success = (
-               (forward_returns[bearish_signals] < 0).sum() /
-               bearish_signals.sum() if bearish_signals.any() else 0
-           )
+            return {
+                'patterns': patterns,
+                'recent_patterns': recent_patterns,
+                'success_rates': success_rates
+            }
 
-           return {
-               'bullish_rate': bullish_success,
-               'bearish_rate': bearish_success,
-               'total_signals': (bullish_signals | bearish_signals).sum()
-           }
+        except Exception as e:
+            self.logger.error(f"Pattern detection failed: {str(e)}")
+            return {}
 
-       except Exception as e:
-           self.logger.error(f"Success rate calculation failed: {str(e)}")
-           return {
-               'bullish_rate': 0,
-               'bearish_rate': 0,
-               'total_signals': 0
-           }
+    def _calculate_pattern_success(
+        self,
+        pattern: pd.Series,
+        prices: pd.Series,
+        lookforward: int = 10
+    ) -> Dict[str, float]:
+        """
+        Calculate pattern success rates
+
+        Args:
+            pattern: Series of pattern signals
+            prices: Series of close prices
+            lookforward: Number of bars to look forward for success/failure
+
+        Returns:
+            Dictionary with success rates for bullish and bearish signals
+        """
+        try:
+            bullish_signals = pattern > 0
+            bearish_signals = pattern < 0
+
+            forward_returns = prices.shift(-lookforward) / prices - 1
+
+            bullish_success = (
+                (forward_returns[bullish_signals] > 0).sum() /
+                bullish_signals.sum() if bullish_signals.any() else 0
+            )
+            bearish_success = (
+                (forward_returns[bearish_signals] < 0).sum() /
+                bearish_signals.sum() if bearish_signals.any() else 0
+            )
+
+            return {
+                'bullish_rate': float(bullish_success),
+                'bearish_rate': float(bearish_success),
+                'total_signals': int((bullish_signals | bearish_signals).sum())
+            }
+
+        except Exception as e:
+            self.logger.error(f"Success rate calculation failed: {str(e)}")
+            return {
+                'bullish_rate': 0.0,
+                'bearish_rate': 0.0,
+                'total_signals': 0
+            }

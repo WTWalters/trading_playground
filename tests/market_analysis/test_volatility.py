@@ -23,8 +23,8 @@ def sample_data():
    for i in range(len(data)):
        prices = [data.iloc[i]['open'], data.iloc[i]['high'],
                 data.iloc[i]['low'], data.iloc[i]['close']]
-       data.iloc[i]['high'] = max(prices)
-       data.iloc[i]['low'] = min(prices)
+       data.loc[data.index[i], 'high'] = max(prices)
+       data.loc[data.index[i], 'low'] = min(prices)
 
    return data
 
