@@ -47,6 +47,7 @@ class SimpleBacktest:
         """
         try:
             current_capital = initial_capital
+            gross_profit = 0.0
             current_position = None
             results = []
             total_commission = 0.0
@@ -55,6 +56,10 @@ class SimpleBacktest:
             for i in range(len(data) - 1):
                 current_data = data.iloc[:i+1]
 
+                # Skip until we have enough data
+                if len(current_data) < self.config.minimum_data_points:
+                    continue
+
                 # Run analysis
                 vol_result = await self.volatility_analyzer.analyze(current_data)
                 trend_result = await self.trend_analyzer.analyze(current_data)
@@ -62,19 +67,16 @@ class SimpleBacktest:
                 # Generate signal
                 signal = 'HOLD'
                 if strategy:
-                    # Ensure vol_result and trend_result have necessary structure
                     if vol_result and trend_result:
-                        signal = strategy({
-                            'metrics': {'volatility_regime': 'normal_volatility'}
-                            if not vol_result.get('metrics') else vol_result['metrics']
-                        }, trend_result)
+                        signal = strategy(vol_result, trend_result)
                 else:
-                    # Default strategy with safe dictionary access
-                    if (vol_result and trend_result and
-                        vol_result.get('metrics', {}).get('volatility_regime') == 'low_volatility' and
-                        trend_result.get('regime', '').value == 'trending_up'):
+                    # Default strategy
+                    vol_regime = getattr(vol_result.get('metrics', {}), 'volatility_regime', 'normal_volatility')
+                    trend_regime = getattr(trend_result.get('regime', None), 'value', None)
+                    
+                    if vol_regime == 'low_volatility' and trend_regime == 'trending_up':
                         signal = 'BUY'
-                    elif vol_result and vol_result.get('metrics', {}).get('volatility_regime') == 'high_volatility':
+                    elif vol_regime == 'high_volatility':
                         signal = 'SELL'
 
                 strategy_signals.append(signal)
@@ -88,7 +90,7 @@ class SimpleBacktest:
                         current_capital, risk_per_trade * 100, entry_price - stop_loss
                     )
 
-                    # Calculate commission
+                    # Calculate entry commission
                     trade_commission = entry_price * position_size * commission
                     total_commission += trade_commission
                     current_capital -= trade_commission
@@ -119,10 +121,11 @@ class SimpleBacktest:
                     current_position.exit_price = exit_price
                     current_position.exit_time = data.index[i+1]
                     current_position.status = 'CLOSED'
-                    current_position.commission = (current_position.commission or 0) + close_commission
+                    current_position.commission = current_position.commission + close_commission
 
-                    # Update capital
+                    # Update capital and profits
                     trade_profit = current_position.calculate_profit()
+                    gross_profit += trade_profit
                     current_capital += trade_profit - close_commission
 
                     # Record trade
@@ -144,9 +147,11 @@ class SimpleBacktest:
                 'trade_metrics': metrics,
                 'equity_curve': pd.DataFrame(results).set_index('date'),
                 'total_commission': total_commission,
+                'gross_profit': gross_profit,
+                'net_profit': gross_profit - total_commission,
                 'strategy_signals': strategy_signals,
                 'total_trades': len(self.trade_tracker.trades),
-                'win_rate': metrics.get('win_rate', 0.0)  # Add win_rate directly to top level
+                'win_rate': metrics.get('win_rate', 0.0)
             }
 
         except Exception as e:
@@ -169,6 +174,8 @@ class SimpleBacktest:
                 'trade_metrics': empty_metrics,
                 'equity_curve': pd.DataFrame(),
                 'total_commission': 0.0,
+                'gross_profit': 0.0,
+                'net_profit': 0.0,
                 'strategy_signals': [],
                 'total_trades': 0,
                 'win_rate': 0.0
