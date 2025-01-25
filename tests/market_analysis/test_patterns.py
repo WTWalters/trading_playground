@@ -24,25 +24,25 @@ def sample_data():
     dates = pd.date_range(start='2023-01-01', periods=100, freq='D')
     np.random.seed(42)  # For reproducible test data
 
-    # Create base data with some variation
+    # Create base data with explicit float dtype
     data = pd.DataFrame({
-        'open':  [100] * 100,
-        'high':  [105] * 100,
-        'low':   [95] * 100,
-        'close': [101] * 100,
-        'volume': [1000000] * 100
+        'open':  np.array([100] * 100, dtype=float),
+        'high':  np.array([105] * 100, dtype=float),
+        'low':   np.array([95] * 100, dtype=float),
+        'close': np.array([101] * 100, dtype=float),
+        'volume': np.array([1000000] * 100, dtype=float)
     }, index=dates)
 
-    # Add specific patterns
+    # Add specific patterns (now using float values directly)
     # Doji pattern (small body, equal shadows)
-    data.loc[data.index[50], ['open', 'high', 'low', 'close']] = [100, 102, 98, 100.1]
+    data.loc[data.index[50], ['open', 'high', 'low', 'close']] = [100.0, 102.0, 98.0, 100.1]
 
     # Bullish engulfing pattern
-    data.loc[data.index[60], ['open', 'high', 'low', 'close']] = [102, 103, 98, 98]  # Down candle
-    data.loc[data.index[61], ['open', 'high', 'low', 'close']] = [97, 104, 97, 103]  # Up candle engulfs previous
+    data.loc[data.index[60], ['open', 'high', 'low', 'close']] = [102.0, 103.0, 98.0, 98.0]  # Down candle
+    data.loc[data.index[61], ['open', 'high', 'low', 'close']] = [97.0, 104.0, 97.0, 103.0]  # Up candle engulfs previous
 
     # Hammer pattern
-    data.loc[data.index[70], ['open', 'high', 'low', 'close']] = [100, 101, 95, 100.5]
+    data.loc[data.index[70], ['open', 'high', 'low', 'close']] = [100.0, 101.0, 95.0, 100.5]
 
     return data
 
@@ -64,18 +64,18 @@ async def test_pattern_detection_basic(analyzer, sample_data):
 @pytest.mark.asyncio
 async def test_doji_pattern(analyzer):
     """Test specific doji pattern detection"""
-    dates = pd.date_range(start='2023-01-01', periods=20, freq='D')  # Increased period
+    dates = pd.date_range(start='2023-01-01', periods=20, freq='D')
     data = pd.DataFrame({
-        'open':  [100] * 20,
-        'high':  [102] * 20,
-        'low':   [98] * 20,
-        'close': [100.1] * 20
+        'open':  np.array([100.0] * 20, dtype=float),
+        'high':  np.array([102.0] * 20, dtype=float),
+        'low':   np.array([98.0] * 20, dtype=float),
+        'close': np.array([100.1] * 20, dtype=float)
     }, index=dates)
 
-    # Add clear doji patterns
-    data.loc[data.index[10], ['open', 'close']] = [100, 100.05]  # Very small body
-    data.loc[data.index[11], ['open', 'close']] = [100.02, 100]  # Another doji
-    data['volume'] = 1000000
+    # Add clear doji patterns with explicit float values
+    data.loc[data.index[10], ['open', 'close']] = [100.0, 100.05]  # Very small body
+    data.loc[data.index[11], ['open', 'close']] = [100.02, 100.0]  # Another doji
+    data['volume'] = 1000000.0  # Add float type to volume as well
 
     result = await analyzer.analyze(data)
     recent = result['recent_patterns']
@@ -108,13 +108,35 @@ async def test_success_rate_calculation(analyzer, sample_data):
 @pytest.mark.asyncio
 async def test_multiple_patterns(analyzer):
     """Test detection of multiple pattern types"""
-    dates = pd.date_range(start='2023-01-01', periods=40, freq='D')  # Extended period
+    dates = pd.date_range(start='2023-01-01', periods=40, freq='D')
     data = pd.DataFrame({
-        'open':  [100, 90, 80, 100, 110, 100, 95, 90, 100, 100] * 4,  # Repeated pattern
-        'high':  [110, 100, 90, 110, 120, 105, 100, 95, 105, 101] * 4,
-        'low':   [90, 80, 70, 90, 100, 95, 90, 85, 95, 99] * 4,
-        'close': [95, 85, 75, 105, 115, 100, 92, 92, 102, 100] * 4
+        'open':  [],
+        'high':  [],
+        'low':   [],
+        'close': [],
+        'volume': []
     }, index=dates)
+
+    # Create patterns in sequence
+    for i in range(0, 40, 5):
+        # Doji pattern
+        data.loc[dates[i:i+2], 'open'] = [100.0, 100.0]
+        data.loc[dates[i:i+2], 'high'] = [102.0, 102.0]
+        data.loc[dates[i:i+2], 'low'] = [98.0, 98.0]
+        data.loc[dates[i:i+2], 'close'] = [100.1, 100.0]
+
+        # Engulfing pattern
+        data.loc[dates[i+2:i+4], 'open'] = [102.0, 98.0]
+        data.loc[dates[i+2:i+4], 'high'] = [103.0, 104.0]
+        data.loc[dates[i+2:i+4], 'low'] = [98.0, 97.0]
+        data.loc[dates[i+2:i+4], 'close'] = [98.0, 103.0]
+
+        # Hammer pattern
+        data.loc[dates[i+4], 'open'] = 100.0
+        data.loc[dates[i+4], 'high'] = 101.0
+        data.loc[dates[i+4], 'low'] = 95.0
+        data.loc[dates[i+4], 'close'] = 100.5
+
     data['volume'] = 1000000
 
     result = await analyzer.analyze(data)
@@ -123,9 +145,10 @@ async def test_multiple_patterns(analyzer):
 
     assert len(patterns) > 0
     assert len(recent) > 0
+
     # Verify multiple pattern types are detected
     pattern_types = {p['pattern'] for p in recent}
-    assert len(pattern_types) > 1
+    assert len(pattern_types) > 1, f"Expected multiple pattern types, got only: {pattern_types}"
 
 @pytest.mark.asyncio
 async def test_pattern_signals(analyzer):

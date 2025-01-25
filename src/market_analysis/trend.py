@@ -112,8 +112,8 @@ class TrendAnalyzer(MarketAnalyzer):
             # Ensure all series are free of NaN values
             adx = adx.fillna(0)
             price_slope = price_slope.fillna(0)
-            ema_short = ema_short.fillna(method='ffill').fillna(0)
-            ema_long = ema_long.fillna(method='ffill').fillna(0)
+            ema_short = ema_short.ffill().fillna(0)
+            ema_long = ema_long.ffill().fillna(0)
 
             return {
                 'regime': regime,

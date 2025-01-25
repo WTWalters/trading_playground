@@ -104,11 +104,15 @@ async def test_regime_classification(analyzers, sample_data):
     high_vol_data = sample_data.copy()
     np.random.seed(42)  # For reproducibility
 
-    # Create more extreme volatility by applying multiple shocks
-    volatility_multiplier = np.exp(np.random.normal(0, 0.4, len(sample_data)))  # Increased volatility
-    high_vol_data['close'] *= volatility_multiplier
-    high_vol_data['high'] *= volatility_multiplier * 1.1  # Exaggerate ranges
-    high_vol_data['low'] *= volatility_multiplier * 0.9
+    # Create more extreme volatility with larger shocks
+    volatility_multiplier = np.exp(np.random.normal(0, 0.8, len(sample_data)))  # Increased from 0.4 to 0.8
+
+    # Apply volatility shocks more aggressively
+    for i in range(len(high_vol_data)):
+        # Create more extreme price movements
+        high_vol_data.loc[high_vol_data.index[i], 'close'] *= volatility_multiplier[i]
+        high_vol_data.loc[high_vol_data.index[i], 'high'] = high_vol_data.loc[high_vol_data.index[i], 'close'] * 1.2
+        high_vol_data.loc[high_vol_data.index[i], 'low'] = high_vol_data.loc[high_vol_data.index[i], 'close'] * 0.8
 
     # Run volatility analysis
     vol_result = await analyzers['volatility'].analyze(high_vol_data)
