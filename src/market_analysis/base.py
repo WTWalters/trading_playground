@@ -1,7 +1,7 @@
 # src/market_analysis/base.py
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any  # Added Any import
 from enum import Enum
 from dataclasses import dataclass
 import pandas as pd
