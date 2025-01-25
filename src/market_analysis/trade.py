@@ -8,7 +8,23 @@ import logging
 
 @dataclass
 class Trade:
-    """Individual trade record"""
+    """
+    Individual trade record containing all relevant trade information
+
+    Attributes:
+        entry_price: Price at which the trade was entered
+        exit_price: Price at which the trade was exited (None if still open)
+        entry_time: Timestamp of trade entry
+        exit_time: Timestamp of trade exit (None if still open)
+        position_size: Number of units traded
+        direction: Trade direction ('LONG' or 'SHORT')
+        stop_loss: Stop loss price level
+        take_profit: Take profit price level
+        status: Current trade status ('OPEN', 'CLOSED', 'CANCELLED')
+        profit: Realized profit/loss (None if not closed)
+        risk_amount: Amount of capital risked on the trade
+        commission: Trading commission paid
+    """
     entry_price: float
     exit_price: Optional[float]
     entry_time: datetime
@@ -23,22 +39,30 @@ class Trade:
     commission: Optional[float] = None
 
     def calculate_profit(self) -> float:
-        """Calculate profit/loss for the trade"""
+        """
+        Calculate the profit/loss for the trade including commission
+
+        Returns:
+            Float representing the total profit/loss
+        """
         if self.exit_price is None:
             return 0.0
 
+        # Calculate based on direction (long/short)
         multiplier = 1 if self.direction == 'LONG' else -1
         gross_profit = (self.exit_price - self.entry_price) * self.position_size * multiplier
 
+        # Subtract commission if applicable
         if self.commission:
             gross_profit -= self.commission
 
         return gross_profit
 
 class TradeTracker:
-    """Track and analyze trading performance"""
+    """Track and analyze trading performance metrics"""
 
     def __init__(self):
+        """Initialize trade tracker with empty trade list"""
         self.trades: List[Trade] = []
         self.logger = logging.getLogger(__name__)
 
@@ -55,13 +79,29 @@ class TradeTracker:
         commission: float = 0,
         risk_amount: float = 0
     ):
-        """Add a new trade to the tracker"""
+        """
+        Add a new trade to the tracker
+
+        Args:
+            entry_price: Trade entry price
+            exit_price: Trade exit price
+            entry_time: Entry timestamp (defaults to now)
+            exit_time: Exit timestamp (defaults to now)
+            position_size: Number of units traded
+            direction: Trade direction ('LONG' or 'SHORT')
+            stop_loss: Stop loss price level
+            take_profit: Take profit price level
+            commission: Trading commission
+            risk_amount: Amount risked on the trade
+        """
         try:
+            # Set default timestamps if not provided
             if entry_time is None:
                 entry_time = datetime.now()
             if exit_time is None:
                 exit_time = datetime.now()
 
+            # Create and add new trade
             trade = Trade(
                 entry_price=entry_price,
                 exit_price=exit_price,
@@ -76,6 +116,7 @@ class TradeTracker:
                 risk_amount=risk_amount
             )
 
+            # Calculate and set profit
             trade.profit = trade.calculate_profit()
             self.trades.append(trade)
 
@@ -83,14 +124,30 @@ class TradeTracker:
             self.logger.error(f"Failed to add trade: {str(e)}")
 
     def get_metrics(self) -> Dict:
-        """Calculate trading performance metrics"""
+        """
+        Calculate comprehensive trading performance metrics
+
+        Returns:
+            Dictionary containing various performance metrics including:
+            - total_trades: Total number of trades
+            - winning_trades: Number of profitable trades
+            - losing_trades: Number of losing trades
+            - win_rate: Percentage of winning trades
+            - total_profit: Total profit/loss
+            - average_profit: Average profit per trade
+            - largest_win: Largest winning trade
+            - largest_loss: Largest losing trade
+            - avg_trade_duration: Average trade duration
+            - profit_factor: Ratio of gross profits to gross losses
+        """
         try:
             if not self.trades:
                 return self._empty_metrics()
 
+            # Calculate profit metrics
             profits = [trade.profit for trade in self.trades if trade.profit is not None]
-            durations = [(trade.exit_time - trade.entry_time) for trade in self.trades
-                        if trade.exit_time and trade.entry_time]
+            durations = [(trade.exit_time - trade.entry_time)
+                        for trade in self.trades if trade.exit_time and trade.entry_time]
 
             return {
                 'total_trades': len(self.trades),
@@ -110,7 +167,12 @@ class TradeTracker:
             return self._empty_metrics()
 
     def get_win_rate(self) -> float:
-        """Calculate win rate"""
+        """
+        Calculate the percentage of winning trades
+
+        Returns:
+            Float representing win rate (0.0 to 1.0)
+        """
         if not self.trades:
             return 0.0
 
@@ -118,22 +180,37 @@ class TradeTracker:
         return winning_trades / len(self.trades)
 
     def get_total_profit(self) -> float:
-        """Calculate total profit"""
+        """
+        Calculate total profit/loss across all trades
+
+        Returns:
+            Float representing total profit/loss
+        """
         return sum(trade.profit for trade in self.trades if trade.profit is not None)
 
     def get_max_consecutive_wins(self) -> int:
-        """Calculate maximum consecutive winning trades"""
+        """
+        Calculate maximum streak of consecutive winning trades
+
+        Returns:
+            Integer representing longest winning streak
+        """
         max_streak = current_streak = 0
         for trade in self.trades:
-            if hasattr(trade, 'profit') and trade.profit > 0:
+            if trade.profit and trade.profit > 0:
                 current_streak += 1
-            else:
                 max_streak = max(max_streak, current_streak)
+            else:
                 current_streak = 0
-        return max(max_streak, current_streak)  # Don't forget to check final streak
+        return max_streak
 
     def get_max_consecutive_losses(self) -> int:
-        """Calculate maximum consecutive losing trades"""
+        """
+        Calculate maximum streak of consecutive losing trades
+
+        Returns:
+            Integer representing longest losing streak
+        """
         max_streak = current_streak = 0
         for trade in self.trades:
             if trade.profit and trade.profit < 0:
@@ -144,7 +221,15 @@ class TradeTracker:
         return max_streak
 
     def get_risk_metrics(self) -> Dict:
-        """Calculate risk-related metrics"""
+        """
+        Calculate risk-related trading metrics
+
+        Returns:
+            Dictionary containing:
+            - risk_reward_ratio: Ratio of average profit to average risk
+            - avg_risk_per_trade: Average risk amount per trade
+            - max_drawdown: Maximum peak-to-trough decline
+        """
         try:
             if not self.trades:
                 return {
@@ -156,7 +241,7 @@ class TradeTracker:
             total_profit = sum(t.profit for t in self.trades if t.profit)
             total_risk = sum(t.risk_amount for t in self.trades if t.risk_amount)
 
-            # Calculate risk reward ratio correctly
+            # Calculate risk/reward ratio (total profit / total risk)
             risk_reward_ratio = total_profit / total_risk if total_risk > 0 else 0.0
 
             return {
@@ -174,16 +259,27 @@ class TradeTracker:
             }
 
     def _calculate_profit_factor(self) -> float:
-        """Calculate profit factor (gross profit / gross loss)"""
+        """
+        Calculate the profit factor (gross profit / gross loss)
+
+        Returns:
+            Float representing profit factor
+        """
         gross_profit = sum(t.profit for t in self.trades if t.profit and t.profit > 0)
         gross_loss = abs(sum(t.profit for t in self.trades if t.profit and t.profit < 0))
         return gross_profit / gross_loss if gross_loss != 0 else 0
 
     def _calculate_max_drawdown(self) -> float:
-        """Calculate maximum drawdown from peak equity"""
+        """
+        Calculate the maximum drawdown from peak equity
+
+        Returns:
+            Float representing maximum drawdown as a percentage
+        """
         if not self.trades:
             return 0.0
 
+        # Build equity curve
         equity_curve = []
         current_equity = 0
         for trade in self.trades:
@@ -194,6 +290,7 @@ class TradeTracker:
         if not equity_curve:
             return 0.0
 
+        # Calculate maximum drawdown
         peak = 0
         max_dd = 0
         for equity in equity_curve:
@@ -205,7 +302,12 @@ class TradeTracker:
         return max_dd
 
     def _empty_metrics(self) -> Dict:
-        """Return empty metrics structure"""
+        """
+        Return empty metrics structure for when no trades exist
+
+        Returns:
+            Dictionary with zero values for all metrics
+        """
         return {
             'total_trades': 0,
             'winning_trades': 0,
@@ -220,5 +322,10 @@ class TradeTracker:
         }
 
     def to_dataframe(self) -> pd.DataFrame:
-        """Convert trades to DataFrame for analysis"""
+        """
+        Convert trade history to pandas DataFrame for analysis
+
+        Returns:
+            DataFrame containing all trade information
+        """
         return pd.DataFrame([vars(t) for t in self.trades])

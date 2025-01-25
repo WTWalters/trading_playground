@@ -15,12 +15,18 @@ class SimpleBacktest:
     """Simple backtesting engine for strategy testing"""
 
     def __init__(self, config: AnalysisConfig):
+        """
+        Initialize the backtesting engine
+
+        Args:
+            config: Configuration object containing analysis parameters
+        """
         self.config = config
         self.risk_manager = RiskManager()
         self.trade_tracker = TradeTracker()
         self.logger = logging.getLogger(__name__)
 
-        # Initialize analyzers
+        # Initialize market analyzers
         self.volatility_analyzer = VolatilityAnalyzer(config)
         self.trend_analyzer = TrendAnalyzer(config)
 
@@ -36,40 +42,51 @@ class SimpleBacktest:
         Run backtest on historical data
 
         Args:
-            data: OHLCV DataFrame
-            initial_capital: Starting capital
-            risk_per_trade: Percentage of capital to risk per trade
-            commission: Commission per trade (percentage)
-            strategy: Optional strategy function
+            data: OHLCV DataFrame with datetime index
+            initial_capital: Starting capital amount
+            risk_per_trade: Fraction of capital to risk per trade (e.g., 0.02 = 2%)
+            commission: Commission rate per trade (e.g., 0.001 = 0.1%)
+            strategy: Optional custom strategy function
 
         Returns:
-            Dictionary containing backtest results
+            Dictionary containing backtest results including:
+            - final_capital: Ending capital
+            - total_return: Percentage return
+            - trade_metrics: Detailed trading statistics
+            - equity_curve: Capital evolution over time
+            - total_commission: Total commission paid
+            - strategy_signals: List of all trading signals
+            - total_trades: Number of trades executed
+            - win_rate: Percentage of winning trades
         """
         try:
+            # Initialize tracking variables
             current_capital = initial_capital
             current_position = None
             results = []
             total_commission = 0.0
             strategy_signals: List[str] = []
 
+            # Iterate through the data
             for i in range(len(data) - 1):
+                # Get data up to current point for analysis
                 current_data = data.iloc[:i+1]
 
-                # Run analysis
+                # Run market analysis
                 vol_result = await self.volatility_analyzer.analyze(current_data)
                 trend_result = await self.trend_analyzer.analyze(current_data)
 
-                # Generate signal
+                # Generate trading signal
                 signal = 'HOLD'
                 if strategy:
-                    # Ensure vol_result and trend_result have necessary structure
+                    # Use custom strategy if provided
                     if vol_result and trend_result:
                         signal = strategy({
                             'metrics': {'volatility_regime': 'normal_volatility'}
                             if not vol_result.get('metrics') else vol_result['metrics']
                         }, trend_result)
                 else:
-                    # Default strategy with safe dictionary access
+                    # Default strategy logic
                     if (vol_result and trend_result and
                         vol_result.get('metrics', {}).get('volatility_regime') == 'low_volatility' and
                         trend_result.get('regime', '').value == 'trending_up'):
@@ -79,21 +96,25 @@ class SimpleBacktest:
 
                 strategy_signals.append(signal)
 
-                # Process signal
+                # Process trading signals
                 if current_position is None and signal == 'BUY':
-                    # Calculate position size
+                    # Open new long position
                     entry_price = data.iloc[i+1]['open']
                     stop_loss = entry_price * 0.99  # 1% stop loss
+
+                    # Calculate position size based on risk
                     position_size = self.risk_manager.calculate_trade_size(
-                        current_capital, risk_per_trade * 100, entry_price - stop_loss
+                        current_capital,
+                        risk_per_trade * 100,
+                        entry_price - stop_loss
                     )
 
-                    # Calculate commission
+                    # Calculate and apply commission
                     trade_commission = entry_price * position_size * commission
                     total_commission += trade_commission
                     current_capital -= trade_commission
 
-                    # Open position
+                    # Create new trade object
                     current_position = Trade(
                         entry_price=entry_price,
                         exit_price=None,
@@ -108,34 +129,38 @@ class SimpleBacktest:
                         risk_amount=position_size * (entry_price - stop_loss)
                     )
 
-                elif current_position and (signal == 'SELL' or
+                elif current_position and (
+                    signal == 'SELL' or
                     data.iloc[i+1]['low'] < current_position.stop_loss or
-                    data.iloc[i+1]['high'] > current_position.take_profit):
-                    # Close position
+                    data.iloc[i+1]['high'] > current_position.take_profit
+                ):
+                    # Close existing position
                     exit_price = data.iloc[i+1]['open']
                     close_commission = exit_price * current_position.position_size * commission
                     total_commission += close_commission
 
+                    # Update position details
                     current_position.exit_price = exit_price
                     current_position.exit_time = data.index[i+1]
                     current_position.status = 'CLOSED'
                     current_position.commission = (current_position.commission or 0) + close_commission
 
-                    # Update capital
+                    # Calculate and apply profit/loss
                     trade_profit = current_position.calculate_profit()
                     current_capital += trade_profit - close_commission
 
-                    # Record trade
+                    # Record completed trade
                     self.trade_tracker.trades.append(current_position)
                     current_position = None
 
+                # Record daily results
                 results.append({
                     'date': data.index[i+1],
                     'capital': current_capital,
                     'signal': signal
                 })
 
-            # Calculate final metrics
+            # Calculate final performance metrics
             metrics = self.trade_tracker.get_metrics()
 
             return {
@@ -146,11 +171,12 @@ class SimpleBacktest:
                 'total_commission': total_commission,
                 'strategy_signals': strategy_signals,
                 'total_trades': len(self.trade_tracker.trades),
-                'win_rate': metrics.get('win_rate', 0.0)  # Add win_rate directly to top level
+                'win_rate': metrics.get('win_rate', 0.0)
             }
 
         except Exception as e:
             self.logger.error(f"Backtest failed: {str(e)}")
+            # Return empty results on error
             empty_metrics = {
                 'total_trades': 0,
                 'winning_trades': 0,
@@ -175,7 +201,19 @@ class SimpleBacktest:
             }
 
     def get_summary_statistics(self) -> Dict:
-        """Calculate summary statistics for the backtest"""
+        """
+        Calculate and return summary statistics for the backtest
+
+        Returns:
+            Dictionary containing key performance metrics including:
+            - total_trades: Number of trades
+            - win_rate: Percentage of winning trades
+            - profit_factor: Ratio of gross profits to gross losses
+            - avg_trade_duration: Average trade duration
+            - max_consecutive_wins: Longest winning streak
+            - max_consecutive_losses: Longest losing streak
+            - risk_metrics: Various risk-related metrics
+        """
         metrics = self.trade_tracker.get_metrics()
         return {
             'total_trades': metrics['total_trades'],
