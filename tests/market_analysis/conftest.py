@@ -2,8 +2,11 @@
 
 import pytest
 import pandas as pd
-from datetime import datetime, timedelta
+import numpy as np
+from datetime import datetime
 from src.market_analysis.base import AnalysisConfig
+from src.market_analysis.backtest import SimpleBacktest  # Add this import
+from src.market_analysis.trade import TradeTracker  # Add this import
 
 @pytest.fixture
 def sample_data():
@@ -21,8 +24,15 @@ def sample_data():
 def backtest_engine():
     """Create a backtest engine instance for testing"""
     config = AnalysisConfig(
-        lookback_period=20,
         volatility_window=20,
-        trend_window=20
+        trend_strength_threshold=0.1,
+        volatility_threshold=0.02,
+        outlier_std_threshold=3.0,
+        minimum_data_points=20
     )
     return SimpleBacktest(config)
+
+@pytest.fixture
+def tracker():
+    """Create trade tracker instance for testing"""
+    return TradeTracker()

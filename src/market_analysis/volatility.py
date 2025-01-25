@@ -10,11 +10,12 @@ class VolatilityAnalyzer(MarketAnalyzer):
     """
     Analyzes market volatility using multiple metrics
 
-    Implements various volatility measures including:
-    - Historical volatility
-    - Average True Range (ATR)
-    - Volatility regimes
+    Features:
+    - Historical volatility calculation
+    - Average True Range (ATR) analysis
+    - Volatility regime classification
     - Z-score based outlier detection
+    - Normalized volatility measures
     """
 
     async def analyze(
@@ -26,30 +27,35 @@ class VolatilityAnalyzer(MarketAnalyzer):
         Calculate comprehensive volatility metrics
 
         Args:
-            data: OHLCV DataFrame
+            data: OHLCV DataFrame with market data
             additional_metrics: Optional metrics from other analyzers
 
         Returns:
             Dictionary containing:
-            - metrics: VolatilityMetrics object
-            - historical_volatility: Time series
-            - normalized_atr: Time series
-            - volatility_zscore: Current z-score
+            - metrics: VolatilityMetrics instance with current readings
+            - historical_volatility: Full time series of volatility
+            - normalized_atr: Time series of normalized ATR
+            - volatility_zscore: Current volatility z-score
+
+        Raises:
+            ValueError: If data validation fails
         """
+        # Validate input data
         if not self._validate_input(data):
-            return self._empty_result()
+            return {}
 
         try:
-            # Validate data quality
+            # Check for data quality
             if data['close'].isna().any():
-                return self._empty_result()
+                self.logger.warning("NaN values detected in close prices")
+                return {}
 
-            # Calculate log returns and historical volatility
+            # Calculate returns and historical volatility
             returns = np.log(data['close'] / data['close'].shift(1))
             hist_vol = (returns.rolling(self.config.volatility_window).std() *
-                       np.sqrt(252)) / 100  # Annualized
+                       np.sqrt(252)) / 100  # Annualize and convert to decimal
 
-            # Calculate ATR and Normalized ATR
+            # Calculate ATR and normalize it
             atr = pd.Series(
                 talib.ATR(
                     data['high'].values,
@@ -61,16 +67,16 @@ class VolatilityAnalyzer(MarketAnalyzer):
             )
             norm_atr = (atr / data['close']).fillna(0)
 
-            # Calculate current metrics
+            # Get current metrics
             current_vol = float(hist_vol.iloc[-1] or 0)
             current_norm_atr = float(norm_atr.iloc[-1] or 0)
 
-            # Calculate z-score and regime
+            # Calculate z-score for regime determination
             vol_mean = hist_vol.mean()
             vol_std = hist_vol.std()
             zscore = float((current_vol - vol_mean) / vol_std if vol_std != 0 else 0)
 
-            # Determine volatility regime
+            # Classify volatility regime
             regime = self._classify_regime(zscore)
 
             # Create metrics object
@@ -90,37 +96,21 @@ class VolatilityAnalyzer(MarketAnalyzer):
 
         except Exception as e:
             self.logger.error(f"Volatility analysis failed: {str(e)}")
-            return self._empty_result()
+            return {}  # Return empty dict on error
 
     def _classify_regime(self, zscore: float) -> str:
         """
-        Classify volatility regime based on z-score
+        Classify current volatility regime based on z-score
 
         Args:
-            zscore: Current volatility z-score
+            zscore: Standard score of current volatility
 
         Returns:
-            String indicating volatility regime
+            String indicating volatility regime:
+            - "high_volatility": Above threshold
+            - "low_volatility": Below negative threshold
+            - "normal_volatility": Within thresholds
         """
         if abs(zscore) > self.config.outlier_std_threshold:
             return "high_volatility" if zscore > 0 else "low_volatility"
         return "normal_volatility"
-
-    def _empty_result(self) -> Dict:
-        """
-        Create empty result structure
-
-        Returns:
-            Dictionary with default/empty values
-        """
-        return {
-            'metrics': VolatilityMetrics(
-                historical_volatility=0.0,
-                normalized_atr=0.0,
-                volatility_regime="unknown",
-                zscore=0.0
-            ),
-            'historical_volatility': pd.Series(),
-            'normalized_atr': pd.Series(),
-            'volatility_zscore': 0.0
-        }
