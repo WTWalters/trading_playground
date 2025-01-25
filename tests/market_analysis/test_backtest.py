@@ -1,30 +1,30 @@
-# tests/market_analysis/test_backtest.py
-
 import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from src.market_analysis.backtest import SimpleBacktest
-from src.market_analysis.base import AnalysisConfig
-from src.market_analysis.volatility import VolatilityAnalyzer
-from src.market_analysis.trend import TrendAnalyzer
+from src.market_analysis.base import AnalysisConfig, MarketRegime
 
 @pytest.fixture
 def sample_data():
-    """Create sample market data for testing"""
+    """Create sample market data for testing with sufficient data points"""
     dates = pd.date_range(start='2023-01-01', periods=100, freq='D')
-    data = pd.DataFrame({
-        'open': np.random.normal(100, 1, 100),
-        'high': np.random.normal(101, 1, 100),
-        'low': np.random.normal(99, 1, 100),
-        'close': np.random.normal(100, 1, 100),
-        'volume': np.random.normal(1000000, 100000, 100)
-    }, index=dates)
-
+    np.random.seed(42)  # For reproducibility
+    
+    # Create trending data for more realistic test scenario
+    trend = np.linspace(100, 120, 100)  # Upward trend
+    volatility = np.linspace(0.5, 2, 100)  # Increasing volatility
+    
+    data = pd.DataFrame(index=dates)
+    data['close'] = trend + np.random.normal(0, volatility, 100)
+    data['open'] = data['close'].shift(1)
+    data.loc[data.index[0], 'open'] = 100  # Set first open
+    
     # Ensure proper high/low relationships
-    data['high'] = data[['open', 'close']].max(axis=1) + 0.5
-    data['low'] = data[['open', 'close']].min(axis=1) - 0.5
-
+    data['high'] = data[['open', 'close']].max(axis=1) + volatility
+    data['low'] = data[['open', 'close']].min(axis=1) - volatility
+    data['volume'] = np.random.normal(1000000, 100000, 100)
+    
     return data
 
 @pytest.fixture
@@ -34,7 +34,8 @@ def backtest_engine():
         volatility_window=20,
         trend_strength_threshold=0.1,
         volatility_threshold=0.02,
-        outlier_std_threshold=2.0
+        outlier_std_threshold=2.0,
+        minimum_data_points=20
     )
     return SimpleBacktest(config)
 
