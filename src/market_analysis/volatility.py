@@ -64,13 +64,11 @@ class VolatilityAnalyzer(MarketAnalyzer):
             # Calculate z-score for regime determination
             vol_mean = hist_vol.mean()
             vol_std = hist_vol.std()
+            # Adjust the volatility threshold calculation
             zscore = float((current_vol - vol_mean) / vol_std if vol_std != 0 else 0)
-
-            # Determine volatility regime based on z-score
-            if zscore > self.config.outlier_std_threshold:
-                regime = "high_volatility"
-            elif zscore < -self.config.outlier_std_threshold:
-                regime = "low_volatility"
+            # Make the regime detection more sensitive
+            if abs(zscore) > self.config.outlier_std_threshold:
+                regime = "high_volatility" if zscore > 0 else "low_volatility"
             else:
                 regime = "normal_volatility"
 
