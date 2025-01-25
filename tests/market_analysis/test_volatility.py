@@ -4,8 +4,8 @@ import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from ..base import AnalysisConfig
-from ..volatility import VolatilityAnalyzer
+from src.market_analysis.base import AnalysisConfig, MarketRegime
+from src.market_analysis.volatility import VolatilityAnalyzer
 
 @pytest.fixture
 def sample_data():

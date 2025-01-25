@@ -3,8 +3,8 @@
 import pytest
 import pandas as pd
 import numpy as np
-from ..base import AnalysisConfig
-from ..mean_reversion import MeanReversionAnalyzer
+from src.market_analysis.base import AnalysisConfig, MarketRegime
+from src.market_analysis.mean_reversion import MeanReversionAnalyzer
 
 @pytest.fixture
 def mean_reverting_data():

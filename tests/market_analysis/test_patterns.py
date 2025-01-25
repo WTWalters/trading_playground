@@ -3,8 +3,8 @@
 import pytest
 import pandas as pd
 import numpy as np
-from ..base import AnalysisConfig
-from ..patterns import PatternAnalyzer
+from src.market_analysis.base import AnalysisConfig, MarketRegime
+from src.market_analysis.patterns import PatternAnalyzer
 
 @pytest.fixture
 def sample_data():
