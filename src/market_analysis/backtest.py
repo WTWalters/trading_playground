@@ -1,23 +1,138 @@
 # src/market_analysis/backtest.py
 
-class BacktestEngine:
-    """Engine for backtesting strategies"""
+from typing import Dict, Callable, Optional
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import logging
+from .base import AnalysisConfig
+from .risk import RiskManager
+from .trade import TradeTracker, Trade
+from .volatility import VolatilityAnalyzer
+from .trend import TrendAnalyzer
 
-    def __init__(
-        self,
-        strategy: TradingStrategy,
-        risk_manager: RiskManager,
-        performance_metrics: PerformanceMetrics
-    ):
-        self.strategy = strategy
-        self.risk_manager = risk_manager
-        self.performance_metrics = performance_metrics
+class SimpleBacktest:
+    """Simple backtesting engine for strategy testing"""
 
-    def run_backtest(
+    def __init__(self, config: AnalysisConfig):
+        self.config = config
+        self.risk_manager = RiskManager()
+        self.trade_tracker = TradeTracker()
+        self.logger = logging.getLogger(__name__)
+
+        # Initialize analyzers
+        self.volatility_analyzer = VolatilityAnalyzer(config)
+        self.trend_analyzer = TrendAnalyzer(config)
+
+    async def run_test(
         self,
         data: pd.DataFrame,
         initial_capital: float,
-        commission: float = 0.0
+        risk_per_trade: float = 0.02,
+        commission: float = 0.0,
+        strategy: Optional[Callable] = None
     ) -> Dict:
-        """Run backtest and return performance metrics"""
-        pass
+        """
+        Run backtest on historical data
+
+        Args:
+            data: OHLCV DataFrame
+            initial_capital: Starting capital
+            risk_per_trade: Percentage of capital to risk per trade
+            commission: Commission per trade (percentage)
+            strategy: Optional strategy function
+
+        Returns:
+            Dictionary containing backtest results
+        """
+        try:
+            current_capital = initial_capital
+            current_position = None
+            results = []
+
+            for i in range(len(data) - 1):
+                current_data = data.iloc[:i+1]
+
+                # Run analysis
+                vol_result = await self.volatility_analyzer.analyze(current_data)
+                trend_result = await self.trend_analyzer.analyze(current_data)
+
+                # Generate signal
+                signal = 'HOLD'
+                if strategy:
+                    signal = strategy(vol_result, trend_result)
+                else:
+                    # Default strategy
+                    if (vol_result['metrics'].volatility_regime == 'low_volatility' and
+                        trend_result['regime'].value == 'trending_up'):
+                        signal = 'BUY'
+                    elif vol_result['metrics'].volatility_regime == 'high_volatility':
+                        signal = 'SELL'
+
+                # Process signal
+                if current_position is None and signal == 'BUY':
+                    # Calculate position size
+                    entry_price = data.iloc[i+1]['open']
+                    stop_loss = entry_price * 0.99  # 1% stop loss
+                    position_size = self.risk_manager.calculate_trade_size(
+                        current_capital, risk_per_trade * 100, entry_price - stop_loss
+                    )
+
+                    # Open position
+                    current_position = Trade(
+                        entry_price=entry_price,
+                        exit_price=None,
+                        entry_time=data.index[i+1],
+                        exit_time=None,
+                        position_size=position_size,
+                        direction='LONG',
+                        stop_loss=stop_loss,
+                        take_profit=entry_price * 1.02,  # 2% take profit
+                        status='OPEN'
+                    )
+
+                elif current_position and (signal == 'SELL' or
+                    data.iloc[i+1]['low'] < current_position.stop_loss or
+                    data.iloc[i+1]['high'] > current_position.take_profit):
+                    # Close position
+                    exit_price = data.iloc[i+1]['open']
+                    commission_amount = (current_position.position_size *
+                                      exit_price * commission)
+
+                    current_position.exit_price = exit_price
+                    current_position.exit_time = data.index[i+1]
+                    current_position.status = 'CLOSED'
+                    current_position.commission = commission_amount
+
+                    # Update capital
+                    trade_profit = current_position.calculate_profit()
+                    current_capital += trade_profit
+
+                    # Record trade
+                    self.trade_tracker.trades.append(current_position)
+                    current_position = None
+
+                results.append({
+                    'date': data.index[i+1],
+                    'capital': current_capital,
+                    'signal': signal
+                })
+
+            # Calculate final metrics
+            metrics = self.trade_tracker.get_metrics()
+
+            return {
+                'final_capital': current_capital,
+                'total_return': (current_capital - initial_capital) / initial_capital,
+                'trade_metrics': metrics,
+                'equity_curve': pd.DataFrame(results).set_index('date')
+            }
+
+        except Exception as e:
+            self.logger.error(f"Backtest failed: {str(e)}")
+            return {
+                'final_capital': initial_capital,
+                'total_return': 0.0,
+                'trade_metrics': self.trade_tracker._empty_metrics(),
+                'equity_curve': pd.DataFrame()
+            }
