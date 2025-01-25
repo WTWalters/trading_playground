@@ -3,7 +3,7 @@
 from typing import Dict, Callable, Optional, List
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from .base import AnalysisConfig
 from .risk import RiskManager
@@ -62,13 +62,19 @@ class SimpleBacktest:
                 # Generate signal
                 signal = 'HOLD'
                 if strategy:
-                    signal = strategy(vol_result, trend_result)
+                    # Ensure vol_result and trend_result have necessary structure
+                    if vol_result and trend_result:
+                        signal = strategy({
+                            'metrics': {'volatility_regime': 'normal_volatility'}
+                            if not vol_result.get('metrics') else vol_result['metrics']
+                        }, trend_result)
                 else:
-                    # Default strategy
-                    if (vol_result['metrics'].volatility_regime == 'low_volatility' and
-                        trend_result['regime'].value == 'trending_up'):
+                    # Default strategy with safe dictionary access
+                    if (vol_result and trend_result and
+                        vol_result.get('metrics', {}).get('volatility_regime') == 'low_volatility' and
+                        trend_result.get('regime', '').value == 'trending_up'):
                         signal = 'BUY'
-                    elif vol_result['metrics'].volatility_regime == 'high_volatility':
+                    elif vol_result and vol_result.get('metrics', {}).get('volatility_regime') == 'high_volatility':
                         signal = 'SELL'
 
                 strategy_signals.append(signal)
@@ -145,14 +151,27 @@ class SimpleBacktest:
 
         except Exception as e:
             self.logger.error(f"Backtest failed: {str(e)}")
+            empty_metrics = {
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'win_rate': 0.0,
+                'total_profit': 0.0,
+                'average_profit': 0.0,
+                'largest_win': 0.0,
+                'largest_loss': 0.0,
+                'avg_trade_duration': timedelta(),
+                'profit_factor': 0.0
+            }
             return {
                 'final_capital': initial_capital,
                 'total_return': 0.0,
-                'trade_metrics': self.trade_tracker._empty_metrics(),
+                'trade_metrics': empty_metrics,
                 'equity_curve': pd.DataFrame(),
                 'total_commission': 0.0,
                 'strategy_signals': [],
-                'total_trades': 0
+                'total_trades': 0,
+                'win_rate': 0.0
             }
 
     def get_summary_statistics(self) -> Dict:
