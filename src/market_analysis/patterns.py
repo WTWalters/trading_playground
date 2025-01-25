@@ -7,17 +7,28 @@ import talib
 from .base import MarketAnalyzer, AnalysisConfig
 
 class PatternAnalyzer(MarketAnalyzer):
-    """Detects candlestick and chart patterns"""
+    """
+    Detects and analyzes candlestick patterns and measures their effectiveness
+    in different market conditions.
+    """
 
     def __init__(self, config: AnalysisConfig):
         """
-        Initialize pattern analyzer with specific configuration
+        Initialize pattern analyzer with configuration and pattern detection parameters.
 
         Args:
-            config: Configuration parameters for analysis
+            config: Analysis configuration object containing window sizes and thresholds
         """
         super().__init__(config)
         self.config.minimum_data_points = 5  # Override minimum data points for patterns
+
+        # Define pattern detection parameters
+        self.pattern_params = {
+            'DOJI': {'body_ratio': 0.1},  # Maximum body/range ratio for doji
+            'ENGULFING': {'body_ratio': 1.5}  # Minimum ratio for engulfing
+        }
+
+        # Initialize TA-Lib pattern functions
         self.pattern_functions = {
             'DOJI': talib.CDLDOJI,
             'ENGULFING': talib.CDLENGULFING,
@@ -33,26 +44,32 @@ class PatternAnalyzer(MarketAnalyzer):
         additional_metrics: Optional[Dict] = None
     ) -> Dict[str, Union[Dict, List, pd.Series]]:
         """
-        Detect chart patterns
+        Detect and analyze candlestick patterns in the given market data.
 
         Args:
             data: DataFrame with OHLCV data
             additional_metrics: Optional dictionary of metrics from other analyzers
 
         Returns:
-            Dictionary containing detected patterns and success rates
+            Dictionary containing:
+                - patterns: Dictionary of detected patterns
+                - recent_patterns: List of recently detected patterns
+                - success_rates: Pattern success rates if trend data is available
         """
         if not self._validate_input(data):
             return {}
 
         try:
-            # Convert data to proper type
+            # Convert data to proper type and calculate basic measurements
             ohlc = data[['open', 'high', 'low', 'close']].astype(float)
+            body_range = abs(ohlc['close'] - ohlc['open'])
+            total_range = ohlc['high'] - ohlc['low']
 
             patterns = {}
             recent_patterns = []
             success_rates = {}
 
+            # Detect standard patterns using TA-Lib
             for name, func in self.pattern_functions.items():
                 pattern = pd.Series(
                     func(
@@ -63,7 +80,6 @@ class PatternAnalyzer(MarketAnalyzer):
                     ),
                     index=data.index
                 )
-
                 patterns[name] = pattern
 
                 # Check for recent pattern occurrences
@@ -76,8 +92,13 @@ class PatternAnalyzer(MarketAnalyzer):
                             'signal': 'bullish' if value > 0 else 'bearish'
                         })
 
-                # Calculate success rates if we have trend data
-                if additional_metrics and 'trend_analysis' in additional_metrics:
+            # Add custom pattern detection
+            is_doji = body_range / total_range < self.pattern_params['DOJI']['body_ratio']
+            patterns['CUSTOM_DOJI'] = pd.Series(np.where(is_doji, 1, 0), index=data.index)
+
+            # Calculate success rates if trend data is available
+            if additional_metrics and 'trend_analysis' in additional_metrics:
+                for name, pattern in patterns.items():
                     success_rates[name] = self._calculate_pattern_success(
                         pattern,
                         ohlc['close'],
@@ -101,7 +122,7 @@ class PatternAnalyzer(MarketAnalyzer):
         lookforward: int = 10
     ) -> Dict[str, float]:
         """
-        Calculate pattern success rates
+        Calculate success rates for pattern signals.
 
         Args:
             pattern: Series of pattern signals
@@ -109,14 +130,20 @@ class PatternAnalyzer(MarketAnalyzer):
             lookforward: Number of bars to look forward for success/failure
 
         Returns:
-            Dictionary with success rates for bullish and bearish signals
+            Dictionary containing:
+                - bullish_rate: Success rate of bullish signals
+                - bearish_rate: Success rate of bearish signals
+                - total_signals: Total number of pattern occurrences
         """
         try:
+            # Identify bullish and bearish signals
             bullish_signals = pattern > 0
             bearish_signals = pattern < 0
 
+            # Calculate forward returns
             forward_returns = prices.shift(-lookforward) / prices - 1
 
+            # Calculate success rates
             bullish_success = (
                 (forward_returns[bullish_signals] > 0).sum() /
                 bullish_signals.sum() if bullish_signals.any() else 0
