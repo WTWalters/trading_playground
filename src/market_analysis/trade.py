@@ -52,7 +52,8 @@ class TradeTracker:
         direction: str = 'LONG',
         stop_loss: float = 0,
         take_profit: float = 0,
-        commission: float = 0
+        commission: float = 0,
+        risk_amount: float = 0
     ):
         """Add a new trade to the tracker"""
         try:
@@ -71,7 +72,8 @@ class TradeTracker:
                 stop_loss=stop_loss,
                 take_profit=take_profit,
                 status='CLOSED',
-                commission=commission
+                commission=commission,
+                risk_amount=risk_amount
             )
 
             trade.profit = trade.calculate_profit()
@@ -99,7 +101,7 @@ class TradeTracker:
                 'average_profit': sum(profits) / len(profits) if profits else 0,
                 'largest_win': max(profits) if profits else 0,
                 'largest_loss': min(profits) if profits else 0,
-                'average_duration': sum(durations, timedelta()) / len(durations) if durations else timedelta(),
+                'avg_trade_duration': sum(durations, timedelta()) / len(durations) if durations else timedelta(),
                 'profit_factor': self._calculate_profit_factor()
             }
 
@@ -119,12 +121,86 @@ class TradeTracker:
         """Calculate total profit"""
         return sum(trade.profit for trade in self.trades if trade.profit is not None)
 
+    def get_max_consecutive_wins(self) -> int:
+        """Calculate maximum consecutive winning trades"""
+        max_streak = current_streak = 0
+        for trade in self.trades:
+            if trade.profit and trade.profit > 0:
+                current_streak += 1
+                max_streak = max(max_streak, current_streak)
+            else:
+                current_streak = 0
+        return max_streak
+
+    def get_max_consecutive_losses(self) -> int:
+        """Calculate maximum consecutive losing trades"""
+        max_streak = current_streak = 0
+        for trade in self.trades:
+            if trade.profit and trade.profit < 0:
+                current_streak += 1
+                max_streak = max(max_streak, current_streak)
+            else:
+                current_streak = 0
+        return max_streak
+
+    def get_risk_metrics(self) -> Dict:
+        """Calculate risk-related metrics"""
+        try:
+            if not self.trades:
+                return {
+                    'risk_reward_ratio': 0.0,
+                    'avg_risk_per_trade': 0.0,
+                    'max_drawdown': 0.0
+                }
+
+            total_risk = sum(t.risk_amount for t in self.trades if t.risk_amount is not None)
+            total_profit = self.get_total_profit()
+
+            return {
+                'risk_reward_ratio': total_profit / total_risk if total_risk != 0 else 0.0,
+                'avg_risk_per_trade': total_risk / len(self.trades),
+                'max_drawdown': self._calculate_max_drawdown()
+            }
+
+        except Exception as e:
+            self.logger.error(f"Failed to calculate risk metrics: {str(e)}")
+            return {
+                'risk_reward_ratio': 0.0,
+                'avg_risk_per_trade': 0.0,
+                'max_drawdown': 0.0
+            }
+
     def _calculate_profit_factor(self) -> float:
         """Calculate profit factor (gross profit / gross loss)"""
         gross_profit = sum(t.profit for t in self.trades if t.profit and t.profit > 0)
         gross_loss = abs(sum(t.profit for t in self.trades if t.profit and t.profit < 0))
 
         return gross_profit / gross_loss if gross_loss != 0 else 0
+
+    def _calculate_max_drawdown(self) -> float:
+        """Calculate maximum drawdown from peak equity"""
+        if not self.trades:
+            return 0.0
+
+        equity_curve = []
+        current_equity = 0
+        for trade in self.trades:
+            if trade.profit:
+                current_equity += trade.profit
+                equity_curve.append(current_equity)
+
+        if not equity_curve:
+            return 0.0
+
+        peak = 0
+        max_dd = 0
+        for equity in equity_curve:
+            if equity > peak:
+                peak = equity
+            dd = (peak - equity) / peak if peak > 0 else 0
+            max_dd = max(max_dd, dd)
+
+        return max_dd
 
     def _empty_metrics(self) -> Dict:
         """Return empty metrics structure"""
@@ -137,7 +213,7 @@ class TradeTracker:
             'average_profit': 0.0,
             'largest_win': 0.0,
             'largest_loss': 0.0,
-            'average_duration': timedelta(),
+            'avg_trade_duration': timedelta(),
             'profit_factor': 0.0
         }
 

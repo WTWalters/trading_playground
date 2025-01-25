@@ -1,6 +1,6 @@
 # src/market_analysis/backtest.py
 
-from typing import Dict, Callable, Optional
+from typing import Dict, Callable, Optional, List
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -49,6 +49,8 @@ class SimpleBacktest:
             current_capital = initial_capital
             current_position = None
             results = []
+            total_commission = 0.0
+            strategy_signals: List[str] = []
 
             for i in range(len(data) - 1):
                 current_data = data.iloc[:i+1]
@@ -69,6 +71,8 @@ class SimpleBacktest:
                     elif vol_result['metrics'].volatility_regime == 'high_volatility':
                         signal = 'SELL'
 
+                strategy_signals.append(signal)
+
                 # Process signal
                 if current_position is None and signal == 'BUY':
                     # Calculate position size
@@ -77,6 +81,11 @@ class SimpleBacktest:
                     position_size = self.risk_manager.calculate_trade_size(
                         current_capital, risk_per_trade * 100, entry_price - stop_loss
                     )
+
+                    # Calculate commission
+                    trade_commission = entry_price * position_size * commission
+                    total_commission += trade_commission
+                    current_capital -= trade_commission
 
                     # Open position
                     current_position = Trade(
@@ -88,7 +97,9 @@ class SimpleBacktest:
                         direction='LONG',
                         stop_loss=stop_loss,
                         take_profit=entry_price * 1.02,  # 2% take profit
-                        status='OPEN'
+                        status='OPEN',
+                        commission=trade_commission,
+                        risk_amount=position_size * (entry_price - stop_loss)
                     )
 
                 elif current_position and (signal == 'SELL' or
@@ -96,17 +107,17 @@ class SimpleBacktest:
                     data.iloc[i+1]['high'] > current_position.take_profit):
                     # Close position
                     exit_price = data.iloc[i+1]['open']
-                    commission_amount = (current_position.position_size *
-                                      exit_price * commission)
+                    close_commission = exit_price * current_position.position_size * commission
+                    total_commission += close_commission
 
                     current_position.exit_price = exit_price
                     current_position.exit_time = data.index[i+1]
                     current_position.status = 'CLOSED'
-                    current_position.commission = commission_amount
+                    current_position.commission = (current_position.commission or 0) + close_commission
 
                     # Update capital
                     trade_profit = current_position.calculate_profit()
-                    current_capital += trade_profit
+                    current_capital += trade_profit - close_commission
 
                     # Record trade
                     self.trade_tracker.trades.append(current_position)
@@ -125,7 +136,10 @@ class SimpleBacktest:
                 'final_capital': current_capital,
                 'total_return': (current_capital - initial_capital) / initial_capital,
                 'trade_metrics': metrics,
-                'equity_curve': pd.DataFrame(results).set_index('date')
+                'equity_curve': pd.DataFrame(results).set_index('date'),
+                'total_commission': total_commission,
+                'strategy_signals': strategy_signals,
+                'total_trades': len(self.trade_tracker.trades)
             }
 
         except Exception as e:
@@ -134,5 +148,21 @@ class SimpleBacktest:
                 'final_capital': initial_capital,
                 'total_return': 0.0,
                 'trade_metrics': self.trade_tracker._empty_metrics(),
-                'equity_curve': pd.DataFrame()
+                'equity_curve': pd.DataFrame(),
+                'total_commission': 0.0,
+                'strategy_signals': [],
+                'total_trades': 0
             }
+
+    def get_summary_statistics(self) -> Dict:
+        """Calculate summary statistics for the backtest"""
+        metrics = self.trade_tracker.get_metrics()
+        return {
+            'total_trades': metrics['total_trades'],
+            'win_rate': metrics['win_rate'],
+            'profit_factor': metrics['profit_factor'],
+            'avg_trade_duration': metrics['avg_trade_duration'],
+            'max_consecutive_wins': self.trade_tracker.get_max_consecutive_wins(),
+            'max_consecutive_losses': self.trade_tracker.get_max_consecutive_losses(),
+            'risk_metrics': self.trade_tracker.get_risk_metrics()
+        }
