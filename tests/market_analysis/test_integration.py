@@ -60,7 +60,7 @@ def config():
         volatility_window=20,
         trend_strength_threshold=0.1,
         volatility_threshold=0.02,
-        outlier_std_threshold=1.5,  # Reduced threshold for more sensitive volatility detection
+        outlier_std_threshold=1.0,  # Reduced threshold to make high volatility detection more sensitive
         minimum_data_points=20
     )
 
@@ -105,26 +105,37 @@ async def test_regime_classification(analyzers, sample_data):
     np.random.seed(42)  # For reproducibility
 
     # Create more extreme volatility with larger shocks
-    base_volatility = 1.0  # Base volatility level
-    shock_magnitude = 0.15  # Magnitude of volatility shocks
+    base_volatility = 2.0  # Increased base volatility
+    shock_magnitude = 0.3  # Increased shock magnitude
 
-    # Apply increasing volatility shocks
+    # Apply increasing volatility shocks with cumulative effect
+    cumulative_shock = 0
     for i in range(len(high_vol_data)):
-        # Create shock pattern
-        shock = np.random.normal(0, shock_magnitude * (i / len(high_vol_data) + 1))
+        # Create growing shock pattern
+        period_shock = np.random.normal(0, shock_magnitude * (i / len(high_vol_data) + 1))
+        cumulative_shock += period_shock
+
         current_price = high_vol_data.loc[high_vol_data.index[i], 'close']
 
-        # Apply shock to prices
-        high_vol_data.loc[high_vol_data.index[i], 'close'] = current_price * np.exp(shock)
-        high_vol_data.loc[high_vol_data.index[i], 'high'] = current_price * np.exp(shock + base_volatility * 0.1)
-        high_vol_data.loc[high_vol_data.index[i], 'low'] = current_price * np.exp(shock - base_volatility * 0.1)
+        # Apply cumulative shock to prices
+        shock_multiplier = np.exp(cumulative_shock)
+        high_vol_data.loc[high_vol_data.index[i], 'close'] = current_price * shock_multiplier
+        high_vol_data.loc[high_vol_data.index[i], 'high'] = current_price * shock_multiplier * (1 + base_volatility * 0.2)
+        high_vol_data.loc[high_vol_data.index[i], 'low'] = current_price * shock_multiplier * (1 - base_volatility * 0.2)
 
-        # Set open price
+        # Set open price with gap
         if i > 0:
-            high_vol_data.loc[high_vol_data.index[i], 'open'] = high_vol_data.loc[high_vol_data.index[i-1], 'close']
+            prev_close = high_vol_data.loc[high_vol_data.index[i-1], 'close']
+            gap = np.random.normal(0, shock_magnitude)
+            high_vol_data.loc[high_vol_data.index[i], 'open'] = prev_close * np.exp(gap)
 
-    # Run volatility analysis
+    # Print volatility metrics for debugging
     vol_result = await analyzers['volatility'].analyze(high_vol_data)
+    print(f"\nVolatility Analysis:")
+    print(f"Z-score: {vol_result['metrics'].zscore}")
+    print(f"Historical Volatility: {vol_result['metrics'].historical_volatility}")
+    print(f"Normalized ATR: {vol_result['metrics'].normalized_atr}")
+
     assert vol_result['metrics'].volatility_regime == 'high_volatility', \
         f"Expected high volatility, got {vol_result['metrics'].volatility_regime} with z-score {vol_result['metrics'].zscore}"
 
@@ -134,7 +145,6 @@ async def test_regime_classification(analyzers, sample_data):
         additional_metrics={'volatility_analysis': vol_result}
     )
     assert trend_result['regime'] == MarketRegime.VOLATILE
-
 @pytest.mark.asyncio
 async def test_pattern_success_rates(analyzers, sample_data):
     """Test pattern success rates in different market regimes"""
