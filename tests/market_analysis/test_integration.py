@@ -105,14 +105,23 @@ async def test_regime_classification(analyzers, sample_data):
     np.random.seed(42)  # For reproducibility
 
     # Create more extreme volatility with larger shocks
-    volatility_multiplier = np.exp(np.random.normal(0, 0.8, len(sample_data)))  # Increased from 0.4 to 0.8
+    base_volatility = 1.0  # Base volatility level
+    shock_magnitude = 0.15  # Magnitude of volatility shocks
 
-    # Apply volatility shocks more aggressively
+    # Apply increasing volatility shocks
     for i in range(len(high_vol_data)):
-        # Create more extreme price movements
-        high_vol_data.loc[high_vol_data.index[i], 'close'] *= volatility_multiplier[i]
-        high_vol_data.loc[high_vol_data.index[i], 'high'] = high_vol_data.loc[high_vol_data.index[i], 'close'] * 1.2
-        high_vol_data.loc[high_vol_data.index[i], 'low'] = high_vol_data.loc[high_vol_data.index[i], 'close'] * 0.8
+        # Create shock pattern
+        shock = np.random.normal(0, shock_magnitude * (i / len(high_vol_data) + 1))
+        current_price = high_vol_data.loc[high_vol_data.index[i], 'close']
+
+        # Apply shock to prices
+        high_vol_data.loc[high_vol_data.index[i], 'close'] = current_price * np.exp(shock)
+        high_vol_data.loc[high_vol_data.index[i], 'high'] = current_price * np.exp(shock + base_volatility * 0.1)
+        high_vol_data.loc[high_vol_data.index[i], 'low'] = current_price * np.exp(shock - base_volatility * 0.1)
+
+        # Set open price
+        if i > 0:
+            high_vol_data.loc[high_vol_data.index[i], 'open'] = high_vol_data.loc[high_vol_data.index[i-1], 'close']
 
     # Run volatility analysis
     vol_result = await analyzers['volatility'].analyze(high_vol_data)

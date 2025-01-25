@@ -109,12 +109,14 @@ async def test_success_rate_calculation(analyzer, sample_data):
 async def test_multiple_patterns(analyzer):
     """Test detection of multiple pattern types"""
     dates = pd.date_range(start='2023-01-01', periods=40, freq='D')
+
+    # Initialize DataFrame with correct length arrays
     data = pd.DataFrame({
-        'open':  [],
-        'high':  [],
-        'low':   [],
-        'close': [],
-        'volume': []
+        'open':  np.zeros(40, dtype=float),
+        'high':  np.zeros(40, dtype=float),
+        'low':   np.zeros(40, dtype=float),
+        'close': np.zeros(40, dtype=float),
+        'volume': np.full(40, 1000000.0, dtype=float)
     }, index=dates)
 
     # Create patterns in sequence
@@ -136,8 +138,6 @@ async def test_multiple_patterns(analyzer):
         data.loc[dates[i+4], 'high'] = 101.0
         data.loc[dates[i+4], 'low'] = 95.0
         data.loc[dates[i+4], 'close'] = 100.5
-
-    data['volume'] = 1000000
 
     result = await analyzer.analyze(data)
     patterns = result['patterns']
