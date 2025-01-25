@@ -122,15 +122,15 @@ class TradeTracker:
         return sum(trade.profit for trade in self.trades if trade.profit is not None)
 
     def get_max_consecutive_wins(self) -> int:
-        """Calculate maximum consecutive winning trades"""
-        max_streak = current_streak = 0
-        for trade in self.trades:
-            if trade.profit and trade.profit > 0:
-                current_streak += 1
-                max_streak = max(max_streak, current_streak)
-            else:
-                current_streak = 0
-        return max_streak
+      """Calculate maximum consecutive winning trades"""
+      max_streak = current_streak = 0
+      for trade in self.trades:
+         if hasattr(trade, 'profit') and trade.profit > 0:
+             current_streak += 1
+         else:
+             max_streak = max(max_streak, current_streak)
+             current_streak = 0
+      return max(max_streak, current_streak)  # Don't forget to check final streak
 
     def get_max_consecutive_losses(self) -> int:
         """Calculate maximum consecutive losing trades"""
@@ -143,32 +143,35 @@ class TradeTracker:
                 current_streak = 0
         return max_streak
 
-    def get_risk_metrics(self) -> Dict:
-        """Calculate risk-related metrics"""
-        try:
-            if not self.trades:
-                return {
-                    'risk_reward_ratio': 0.0,
-                    'avg_risk_per_trade': 0.0,
-                    'max_drawdown': 0.0
-                }
-
-            total_risk = sum(t.risk_amount for t in self.trades if t.risk_amount is not None)
-            total_profit = self.get_total_profit()
-
-            return {
-                'risk_reward_ratio': total_profit / total_risk if total_risk != 0 else 0.0,
-                'avg_risk_per_trade': total_risk / len(self.trades),
-                'max_drawdown': self._calculate_max_drawdown()
-            }
-
-        except Exception as e:
-            self.logger.error(f"Failed to calculate risk metrics: {str(e)}")
+def get_risk_metrics(self) -> Dict:
+    """Calculate risk-related metrics"""
+    try:
+        if not self.trades:
             return {
                 'risk_reward_ratio': 0.0,
                 'avg_risk_per_trade': 0.0,
                 'max_drawdown': 0.0
             }
+
+        total_profit = sum(t.profit for t in self.trades if t.profit)
+        total_risk = sum(t.risk_amount for t in self.trades if t.risk_amount)
+
+        # Calculate risk reward ratio correctly
+        risk_reward_ratio = total_profit / total_risk if total_risk > 0 else 0.0
+
+        return {
+            'risk_reward_ratio': risk_reward_ratio,
+            'avg_risk_per_trade': total_risk / len(self.trades) if self.trades else 0.0,
+            'max_drawdown': self._calculate_max_drawdown()
+        }
+
+    except Exception as e:
+        self.logger.error(f"Failed to calculate risk metrics: {str(e)}")
+        return {
+            'risk_reward_ratio': 0.0,
+            'avg_risk_per_trade': 0.0,
+            'max_drawdown': 0.0
+        }
 
     def _calculate_profit_factor(self) -> float:
         """Calculate profit factor (gross profit / gross loss)"""

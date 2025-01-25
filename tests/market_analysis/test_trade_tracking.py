@@ -1,7 +1,7 @@
 # tests/market_analysis/test_trade_tracking.py
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta  # Add timedelta import
 from src.market_analysis.trade import TradeTracker
 
 @pytest.fixture

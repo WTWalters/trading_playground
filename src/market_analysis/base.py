@@ -53,7 +53,7 @@ class MarketAnalyzer(ABC):
             self.logger.error(f"Missing required columns: {required_columns}")
             return False
 
-        if len(data) < self.config.minimum_data_points:
+        if len(data) < max(2, self.config.minimum_data_points):  # Ensure at least 2 data points
             self.logger.error(f"Insufficient data points: {len(data)}")
             return False
 

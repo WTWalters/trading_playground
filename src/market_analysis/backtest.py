@@ -139,7 +139,8 @@ class SimpleBacktest:
                 'equity_curve': pd.DataFrame(results).set_index('date'),
                 'total_commission': total_commission,
                 'strategy_signals': strategy_signals,
-                'total_trades': len(self.trade_tracker.trades)
+                'total_trades': len(self.trade_tracker.trades),
+                'win_rate': metrics.get('win_rate', 0.0)  # Add win_rate directly to top level
             }
 
         except Exception as e:
