@@ -55,15 +55,16 @@ async def test_volatility_analysis_basic(analyzer, sample_data):
     result = await analyzer.analyze(sample_data)
 
     assert 'metrics' in result
-    assert 'historical_volatility' in result
-    assert 'normalized_atr' in result
-    assert 'volatility_zscore' in result
+    assert 'historical_series' in result
+    assert 'signals' in result
+    assert 'regimes' in result
 
     metrics = result['metrics']
+    assert metrics is not None
     assert 0 <= metrics.historical_volatility <= 1
     assert 0 <= metrics.normalized_atr <= 1
-    assert isinstance(metrics.volatility_regime, str)
-    assert isinstance(metrics.zscore, float)
+    assert hasattr(metrics.regime, 'value')  # Check regime enum
+    assert isinstance(metrics.volatility_zscore, float)
 
 @pytest.mark.asyncio
 async def test_volatility_regimes(analyzer):
@@ -85,7 +86,7 @@ async def test_volatility_regimes(analyzer):
     high_vol_data['volume'] = 1000000
 
     result = await analyzer.analyze(high_vol_data)
-    assert result['metrics'].volatility_regime in ['normal_volatility', 'high_volatility']
+    assert result['metrics'].regime.value in ['normal', 'high', 'extremely_high']
 
 @pytest.mark.asyncio
 async def test_invalid_data(analyzer):
@@ -100,7 +101,12 @@ async def test_invalid_data(analyzer):
     }, index=dates)
 
     result = await analyzer.analyze(invalid_data)
-    assert result == {}
+    assert result == {
+        'metrics': None,
+        'historical_series': {},
+        'signals': {},
+        'regimes': []
+    }
 
 @pytest.mark.asyncio
 async def test_insufficient_data(analyzer):
@@ -115,4 +121,9 @@ async def test_insufficient_data(analyzer):
     }, index=dates)
 
     result = await analyzer.analyze(short_data)
-    assert result == {}
+    assert result == {
+        'metrics': None,
+        'historical_series': {},
+        'signals': {},
+        'regimes': []
+    }
