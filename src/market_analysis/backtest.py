@@ -25,18 +25,19 @@ class BacktestResults:
     win_rate: float
     max_drawdown: float
     volatility_metrics: Dict[str, Any]
+    regime: Optional[str] = None  # Added for regime tracking
+
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+    def __contains__(self, key):
+        return hasattr(self, key)
+
+    def get(self, key, default=None):
+        return getattr(self, key, default)
 
 class SimpleBacktest:
-    """
-    A simple backtesting engine for trading strategy evaluation.
-
-    Attributes:
-        config: Configuration parameters
-        risk_manager: Handles position sizing and risk calculations
-        trade_tracker: Tracks and analyzes trades
-        volatility_analyzer: Analyzes market volatility
-        trend_analyzer: Analyzes market trends
-    """
+    """A simple backtesting engine for trading strategy evaluation."""
 
     def __init__(self, config: AnalysisConfig):
         self.config = config
@@ -53,19 +54,9 @@ class SimpleBacktest:
         initial_capital: float,
         risk_per_trade: float = 0.02,
         commission: float = 0.0,
+        strategy: Optional[Callable] = None,
     ) -> BacktestResults:
-        """
-        Execute backtest on historical data.
-
-        Args:
-            data: Historical price data (OHLCV)
-            initial_capital: Starting capital
-            risk_per_trade: Risk per trade (as decimal)
-            commission: Commission rate (as decimal)
-
-        Returns:
-            BacktestResults containing performance metrics
-        """
+        """Execute backtest on historical data."""
         try:
             self._validate_inputs(data, initial_capital, risk_per_trade, commission)
 
@@ -74,26 +65,26 @@ class SimpleBacktest:
                 'commission': 0.0,
                 'signals': [],
                 'trades': [],
-                'equity_curve': []
+                'equity_curve': [],
+                'regime': None
             }
 
             # Process each bar
             for i in range(len(data) - 1):
-                current_bar = data.iloc[i]
+                current_bar = data.iloc[i:i+self.config.analysis_window]
                 next_bar = data.iloc[i + 1]
                 timestamp = data.index[i]
 
-                # Update results with new bar
                 results = await self._process_bar(
                     current_bar=current_bar,
                     next_bar=next_bar,
                     timestamp=timestamp,
                     results=results,
                     risk_per_trade=risk_per_trade,
-                    commission=commission
+                    commission=commission,
+                    strategy=strategy
                 )
 
-            # Calculate final metrics
             final_results = self._calculate_final_results(
                 results=results,
                 initial_capital=initial_capital,
@@ -113,77 +104,89 @@ class SimpleBacktest:
         timestamp: datetime,
         results: Dict[str, Any],
         risk_per_trade: float,
-        commission: float
+        commission: float,
+        strategy: Optional[Callable] = None
     ) -> Dict[str, Any]:
         """Process single price bar and update positions"""
+        try:
+            vol_analysis = await self.volatility_analyzer.analyze(current_bar)
+            vol_metrics = vol_analysis.get('metrics', {})
 
-        # Get market analysis
-        vol_analysis = await self.volatility_analyzer.analyze(
-            pd.DataFrame([current_bar])
-        )
-        trend_analysis = await self.trend_analyzer.analyze(
-            pd.DataFrame([current_bar])
-        )
-
-        # Generate trading signal
-        signal = self._generate_signal(vol_analysis, trend_analysis)
-        results['signals'].append(signal)
-
-        # Handle position management
-        if signal == "BUY" and self.current_position is None:
-            # Enter new position
-            position = self._enter_position(
-                price=next_bar['open'],
-                timestamp=timestamp,
-                capital=results['current_capital'],
-                risk_amount=risk_per_trade * results['current_capital'],
-                commission=commission
+            trend_analysis = await self.trend_analyzer.analyze(
+                current_bar,
+                additional_metrics={'volatility_analysis': vol_metrics}
             )
 
-            if position:
-                self.current_position = position
-                results['commission'] += position.commission
-                results['current_capital'] -= position.commission
+            results['regime'] = trend_analysis.get('regime')
+            signal = self._generate_signal(vol_analysis, trend_analysis, strategy)
+            results['signals'].append(signal)
 
-        elif (signal == "SELL" or
-              (self.current_position and
-               self._should_exit_position(self.current_position, next_bar))):
-            # Exit current position
-            if self.current_position:
-                exit_results = self._exit_position(
-                    position=self.current_position,
+            if signal == "BUY" and self.current_position is None:
+                position = self._enter_position(
                     price=next_bar['open'],
                     timestamp=timestamp,
+                    capital=results['current_capital'],
+                    risk_amount=risk_per_trade * results['current_capital'],
                     commission=commission
                 )
 
-                results['commission'] += exit_results['commission']
-                results['current_capital'] = exit_results['new_capital']
-                results['trades'].append(self.current_position)
-                self.current_position = None
+                if position:
+                    self.current_position = position
+                    results['commission'] += position.commission
+                    results['current_capital'] -= position.commission
 
-        # Record equity curve
-        results['equity_curve'].append({
-            'timestamp': timestamp,
-            'capital': results['current_capital'],
-            'signal': signal
-        })
+            elif (signal == "SELL" or
+                  (self.current_position and
+                   self._should_exit_position(self.current_position, next_bar))):
+                if self.current_position:
+                    exit_results = self._exit_position(
+                        position=self.current_position,
+                        price=next_bar['open'],
+                        timestamp=timestamp,
+                        commission=commission
+                    )
 
-        return results
+                    results['commission'] += exit_results['commission']
+                    results['current_capital'] = exit_results['new_capital']
+                    results['trades'].append(self.current_position)
+                    self.current_position = None
+
+            results['equity_curve'].append({
+                'timestamp': timestamp,
+                'capital': results['current_capital'],
+                'signal': signal,
+                'regime': results['regime']
+            })
+
+            return results
+
+        except Exception as e:
+            self.logger.error(f"Bar processing failed: {str(e)}")
+            return results
 
     def _generate_signal(
         self,
         volatility: Dict[str, Any],
-        trend: Dict[str, Any]
+        trend: Dict[str, Any],
+        strategy: Optional[Callable] = None
     ) -> str:
         """Generate trading signal based on analysis"""
+        try:
+            if strategy:
+                return strategy(volatility, trend)
 
-        if (volatility['regime'] == 'low_volatility' and
-            trend['regime'] == MarketRegime.TRENDING_UP):
-            return "BUY"
-        elif volatility['regime'] == 'high_volatility':
-            return "SELL"
-        return "HOLD"
+            vol_regime = volatility.get('metrics', {}).get('volatility_regime')
+            trend_regime = trend.get('regime')
+
+            if vol_regime == 'low_volatility' and trend_regime == MarketRegime.TRENDING_UP:
+                return "BUY"
+            elif vol_regime == 'high_volatility':
+                return "SELL"
+            return "HOLD"
+
+        except Exception as e:
+            self.logger.error(f"Signal generation failed: {str(e)}")
+            return "HOLD"
 
     def _enter_position(
         self,
@@ -194,10 +197,8 @@ class SimpleBacktest:
         commission: float
     ) -> Optional[Trade]:
         """Create new trading position"""
-
         try:
-            # Calculate position parameters
-            stop_loss = price * 0.99  # 1% stop loss
+            stop_loss = price * 0.99
             position_size = self.risk_manager.calculate_position_size(
                 capital=capital,
                 risk_amount=risk_amount,
@@ -205,7 +206,6 @@ class SimpleBacktest:
                 stop_loss=stop_loss
             )
 
-            # Calculate commission
             entry_commission = price * position_size * commission
 
             return Trade(
@@ -214,9 +214,10 @@ class SimpleBacktest:
                 position_size=position_size,
                 direction=TradeDirection.LONG,
                 stop_loss=stop_loss,
-                take_profit=price * 1.02,  # 2% take profit
+                take_profit=price * 1.02,
                 status=TradeStatus.OPEN,
-                commission=entry_commission
+                commission=entry_commission,
+                entry_capital=capital
             )
 
         except Exception as e:
@@ -231,7 +232,6 @@ class SimpleBacktest:
         commission: float
     ) -> Dict[str, float]:
         """Exit trading position"""
-
         try:
             exit_commission = price * position.position_size * commission
 
@@ -255,6 +255,13 @@ class SimpleBacktest:
                 'new_capital': position.entry_capital
             }
 
+    def _should_exit_position(self, position: Trade, bar: pd.Series) -> bool:
+        """Check if position should be exited based on price action"""
+        return (
+            bar['low'] <= position.stop_loss or
+            bar['high'] >= position.take_profit
+        )
+
     def _calculate_final_results(
         self,
         results: Dict[str, Any],
@@ -262,7 +269,6 @@ class SimpleBacktest:
         data: pd.DataFrame
     ) -> Dict[str, Any]:
         """Calculate final backtest metrics"""
-
         equity_curve = pd.DataFrame(results['equity_curve'])
 
         if not equity_curve.empty:
@@ -282,7 +288,8 @@ class SimpleBacktest:
             'total_trades': len(results['trades']),
             'win_rate': self._calculate_win_rate(results['trades']),
             'max_drawdown': max_drawdown,
-            'volatility_metrics': self.volatility_analyzer.get_metrics(data)
+            'volatility_metrics': self.volatility_analyzer.get_metrics(data),
+            'regime': results.get('regime')
         }
 
     @staticmethod
@@ -328,5 +335,6 @@ class SimpleBacktest:
             total_trades=0,
             win_rate=0.0,
             max_drawdown=0.0,
-            volatility_metrics={}
+            volatility_metrics={},
+            regime=None
         )

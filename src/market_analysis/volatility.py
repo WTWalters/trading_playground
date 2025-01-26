@@ -71,82 +71,80 @@ class VolatilityAnalyzer(MarketAnalyzer):
         self._volatility_history: List[VolatilityMetrics] = []
         self._last_analysis: Optional[VolatilityMetrics] = None
 
-    async def analyze(
-        self,
-        data: pd.DataFrame,
-        additional_metrics: Optional[Dict] = None
-    ) -> Dict[str, Union[float, str, pd.Series, VolatilityMetrics]]:
-        """
-        Perform comprehensive volatility analysis
-
-        Args:
-            data: OHLCV DataFrame
-            additional_metrics: Optional metrics from other analyzers
-
-        Returns:
-            Dictionary containing:
-            - metrics: Current volatility metrics
-            - historical_series: Time series of volatility measures
-            - signals: Generated volatility signals
-            - regimes: Volatility regime classifications
-        """
-        try:
-            if not self._validate_input(data):
-                return self._get_empty_results()
-
-            # Calculate core volatility measures
-            hist_vol = self._calculate_historical_volatility(data)
-            norm_atr = self._calculate_normalized_atr(data)
-            park_vol = self._calculate_parkinson_volatility(data)
-
-            # Calculate volume-based measures
-            vol_metrics = self._analyze_volume_volatility(data)
-
-            # Calculate relative measures
-            zscore, percentile = self._calculate_relative_measures(hist_vol)
-
-            # Determine regime
-            regime = self._classify_regime(zscore)
-
-            # Calculate trend-relative measures
-            trend_vol = self._calculate_trend_relative_volatility(
-                data,
-                hist_vol,
-                additional_metrics
-            )
-
-            # Create metrics object
-            metrics = VolatilityMetrics(
-                historical_volatility=float(hist_vol.iloc[-1]),
-                implied_volatility=None,  # Would require options data
-                normalized_atr=float(norm_atr.iloc[-1]),
-                parkinson_volatility=float(park_vol.iloc[-1]),
-                volatility_zscore=zscore,
-                regime=regime,
-                percentile_rank=percentile,
-                volume_volatility=vol_metrics['volume_volatility'],
-                volume_zscore=vol_metrics['volume_zscore'],
-                trend_relative_volatility=trend_vol['relative_vol'],
-                volatility_trend=trend_vol['vol_trend']
-            )
-
-            # Update history
-            self._update_history(metrics)
-
-            return {
-                'metrics': metrics,
-                'historical_series': {
-                    'historical_volatility': hist_vol,
-                    'normalized_atr': norm_atr,
-                    'parkinson_volatility': park_vol
-                },
-                'signals': self._generate_signals(metrics),
-                'regimes': self._get_regime_changes()
-            }
-
-        except Exception as e:
-            self.logger.error(f"Volatility analysis failed: {str(e)}")
+async def analyze(
+    self,
+    data: pd.DataFrame,
+    additional_metrics: Optional[Dict] = None
+) -> Dict[str, Union[float, str, pd.Series, VolatilityMetrics]]:
+    """Perform comprehensive volatility analysis"""
+    try:
+        if not self._validate_input(data):
             return self._get_empty_results()
+
+        timestamp = data.index[-1]
+
+        # Calculate core volatility measures
+        hist_vol = self._calculate_historical_volatility(data)
+        norm_atr = self._calculate_normalized_atr(data)
+        park_vol = self._calculate_parkinson_volatility(data)
+
+        # Calculate volume-based measures
+        vol_metrics = self._analyze_volume_volatility(data)
+
+        # Calculate relative measures
+        zscore, percentile = self._calculate_relative_measures(hist_vol)
+
+        # Determine regime
+        regime = self._classify_regime(zscore)
+
+        # Calculate trend-relative measures
+        trend_vol = self._calculate_trend_relative_volatility(
+            data,
+            hist_vol,
+            additional_metrics
+        )
+
+        # Create metrics dictionary
+        metrics_dict = {
+            'historical_volatility': float(hist_vol.iloc[-1]),
+            'implied_volatility': None,
+            'normalized_atr': float(norm_atr.iloc[-1]),
+            'parkinson_volatility': float(park_vol.iloc[-1]),
+            'volatility_zscore': zscore,
+            'volatility_regime': regime.value,
+            'percentile_rank': percentile,
+            'volume_volatility': vol_metrics['volume_volatility'],
+            'volume_zscore': vol_metrics['volume_zscore'],
+            'trend_relative_volatility': trend_vol['relative_vol'],
+            'volatility_trend': trend_vol['vol_trend']
+        }
+
+        # Create metrics object using base class helper
+        metrics = self._create_metrics(
+            timestamp=timestamp,
+            metrics_dict=metrics_dict,
+            regime=regime,
+            confidence=0.95
+        )
+
+        # Update history
+        self._update_history(metrics)
+
+        return {
+            'metrics': metrics,
+            'historical_series': {
+                'historical_volatility': hist_vol,
+                'normalized_atr': norm_atr,
+                'parkinson_volatility': park_vol
+            },
+            'signals': self._generate_signals(metrics),
+            'regimes': self._get_regime_changes(),
+            'regime': regime  # Add explicit regime access
+        }
+
+    except Exception as e:
+        self.logger.error(f"Volatility analysis failed: {str(e)}")
+        return self._get_empty_results()
 
     def _calculate_historical_volatility(
         self,

@@ -85,8 +85,13 @@ class AnalysisMetrics:
 
     timestamp: datetime
     metrics: Dict[str, Any]
-    regime: MarketRegime
     confidence: float
+    regime: Optional[MarketRegime] = MarketRegime.UNKNOWN
+
+    def __post_init__(self):
+        """Convert any metric values to proper types"""
+        if isinstance(self.regime, str):
+            self.regime = MarketRegime.from_string(self.regime)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation"""
@@ -97,14 +102,18 @@ class AnalysisMetrics:
             'confidence': self.confidence
         }
 
-    def validate(self) -> bool:
-        """Validate metric values"""
-        return (
-            isinstance(self.timestamp, datetime) and
-            isinstance(self.metrics, dict) and
-            isinstance(self.regime, MarketRegime) and
-            0 <= self.confidence <= 1
-        )
+    def __getitem__(self, key: str) -> Any:
+        """Allow dictionary-like access to metrics"""
+        if key in self.metrics:
+            return self.metrics[key]
+        return getattr(self, key, None)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Get metric value with default"""
+        try:
+            return self[key]
+        except (KeyError, AttributeError):
+            return default
 
 class MarketAnalyzer(ABC):
     """Abstract base class for market analyzers"""
@@ -148,16 +157,23 @@ class MarketAnalyzer(ABC):
             confidence=0.0
         )
 
+    def _create_metrics(
+        self,
+        timestamp: datetime,
+        metrics_dict: Dict[str, Any],
+        regime: MarketRegime = MarketRegime.UNKNOWN,
+        confidence: float = 0.95
+    ) -> AnalysisMetrics:
+        """Helper to create metrics with proper structure"""
+        return AnalysisMetrics(
+            timestamp=timestamp,
+            metrics=metrics_dict,
+            regime=regime,
+            confidence=confidence
+        )
+
     def _validate_input(self, data: pd.DataFrame) -> bool:
-        """
-        Validate input data
-
-        Args:
-            data: OHLCV DataFrame
-
-        Returns:
-            bool: True if data is valid
-        """
+        """Validate input data"""
         try:
             required_columns = ['open', 'high', 'low', 'close', 'volume']
 
@@ -167,22 +183,21 @@ class MarketAnalyzer(ABC):
                 self.logger.error(f"Missing columns: {missing}")
                 return False
 
-            # Check data points
-            if len(data) < self.config.minimum_data_points:
-                self.logger.error(
-                    f"Insufficient data points: {len(data)} "
-                    f"(minimum: {self.config.minimum_data_points})"
-                )
-                return False
-
             # Check for NaN values
             if data[required_columns].isna().any().any():
                 self.logger.error("Data contains missing values")
                 return False
 
-            # Check index
-            if not isinstance(data.index, pd.DatetimeIndex):
-                self.logger.error("DataFrame index must be datetime")
+            # Special case for analysis of single data point
+            if len(data) == 1:
+                return True
+
+            # Check data points for time series analysis
+            if len(data) < self.config.minimum_data_points:
+                self.logger.error(
+                    f"Insufficient data points: {len(data)} "
+                    f"(minimum: {self.config.minimum_data_points})"
+                )
                 return False
 
             return True

@@ -168,12 +168,40 @@ class TradeTracker:
         self._metrics: Optional[TradeMetrics] = None
         self._equity_curve: Optional[pd.Series] = None
 
-    def add_trade(self, trade: Trade) -> None:
-        """Add trade to tracker"""
+    def add_trade(
+        self,
+        trade: Optional[Union[Trade, Dict]] = None,
+        entry_price: Optional[float] = None,
+        exit_price: Optional[float] = None,
+        entry_time: Optional[datetime] = None,
+        exit_time: Optional[datetime] = None,
+        position_size: float = 1.0,
+        commission: float = 0.0,
+    ) -> None:
+        """Add trade to tracker."""
         try:
-            self.trades.append(trade)
-            self._metrics = None  # Reset cached metrics
-            self._equity_curve = None  # Reset cached equity curve
+            if trade is None and entry_price is not None:
+                # Handle direct parameter inputs
+                trade_obj = Trade(
+                    entry_price=entry_price,
+                    position_size=position_size,
+                    direction=TradeDirection.LONG,
+                    entry_time=entry_time or datetime.now(),
+                    exit_price=exit_price,
+                    exit_time=exit_time,
+                    commission=commission,
+                )
+            elif isinstance(trade, dict):
+                trade_obj = Trade(**trade)
+            elif isinstance(trade, Trade):
+                trade_obj = trade
+            else:
+                raise ValueError("Invalid trade parameters")
+
+            self.trades.append(trade_obj)
+            self._metrics = None
+            self._equity_curve = None
+
         except Exception as e:
             self.logger.error(f"Failed to add trade: {str(e)}")
             raise

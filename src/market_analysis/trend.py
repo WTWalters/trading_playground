@@ -86,19 +86,12 @@ class TrendAnalyzer(MarketAnalyzer):
         data: pd.DataFrame,
         additional_metrics: Optional[Dict] = None
     ) -> Dict[str, Union[MarketRegime, pd.Series, float, TrendMetrics]]:
-        """
-        Perform comprehensive trend analysis
-
-        Args:
-            data: OHLCV DataFrame
-            additional_metrics: Optional metrics from other analyzers
-
-        Returns:
-            Dictionary containing trend analysis results
-        """
+        """Perform comprehensive trend analysis"""
         try:
             if not self._validate_input(data):
                 return self._get_empty_results()
+
+            timestamp = data.index[-1]
 
             # Calculate core trend indicators
             adx_metrics = self._calculate_directional_movement(data)
@@ -116,22 +109,29 @@ class TrendAnalyzer(MarketAnalyzer):
             )
             strength = self._classify_strength(adx_metrics['adx'])
 
-            # Create metrics object
-            metrics = TrendMetrics(
+            # Create metrics dictionary
+            metrics_dict = {
+                'strength': strength.value,
+                'momentum': price_metrics['momentum'],
+                'adx': adx_metrics['adx'],
+                'dmi_plus': adx_metrics['dmi_plus'],
+                'dmi_minus': adx_metrics['dmi_minus'],
+                'price_slope': price_metrics['slope'],
+                'price_velocity': price_metrics['velocity'],
+                'price_acceleration': price_metrics['acceleration'],
+                'support_level': structure_metrics['support'],
+                'resistance_level': structure_metrics['resistance'],
+                'trend_age': self._calculate_trend_age(regime),
+                'volume_trend_correlation': confirmation_metrics['volume_correlation'],
+                'swing_magnitude': confirmation_metrics['swing_magnitude']
+            }
+
+            # Create metrics object using base class helper
+            metrics = self._create_metrics(
+                timestamp=timestamp,
+                metrics_dict=metrics_dict,
                 regime=regime,
-                strength=strength,
-                momentum=price_metrics['momentum'],
-                adx=adx_metrics['adx'],
-                dmi_plus=adx_metrics['dmi_plus'],
-                dmi_minus=adx_metrics['dmi_minus'],
-                price_slope=price_metrics['slope'],
-                price_velocity=price_metrics['velocity'],
-                price_acceleration=price_metrics['acceleration'],
-                support_level=structure_metrics['support'],
-                resistance_level=structure_metrics['resistance'],
-                trend_age=self._calculate_trend_age(regime),
-                volume_trend_correlation=confirmation_metrics['volume_correlation'],
-                swing_magnitude=confirmation_metrics['swing_magnitude']
+                confidence=0.95
             )
 
             # Update history
@@ -145,7 +145,8 @@ class TrendAnalyzer(MarketAnalyzer):
                     'adx': adx_metrics['adx_series'],
                     'dmi_plus': adx_metrics['dmi_plus_series'],
                     'dmi_minus': adx_metrics['dmi_minus_series']
-                }
+                },
+                'regime': regime  # Add explicit regime access
             }
 
         except Exception as e:

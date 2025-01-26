@@ -59,54 +59,55 @@ class RiskManager:
         self.max_capital = initial_capital
         self.current_drawdown = 0.0
 
-    def calculate_position_size(
+    def calculate_trade_size(
         self,
-        capital: float,
-        risk_amount: float,
-        entry_price: float,
-        stop_loss: float,
-        volatility_factor: float = 1.0
+        account_size: float,
+        risk_amount: float,  # percentage
+        stop_loss: float,    # absolute stop loss value
+        entry_price: Optional[float] = None,
     ) -> float:
         """
-        Calculate safe position size based on risk parameters.
+        Calculate position size based on account risk parameters.
 
         Args:
-            capital: Available capital
-            risk_amount: Amount willing to risk
-            entry_price: Trade entry price
-            stop_loss: Stop loss price
-            volatility_factor: Volatility adjustment (0-1)
+            account_size: Total account value
+            risk_amount: Risk percentage (1 = 1%)
+            stop_loss: Absolute stop loss value
+            entry_price: Optional entry price for reference
 
         Returns:
-            Position size in base currency units
+            Number of shares/contracts to trade
 
         Raises:
             ValueError: If inputs are invalid
         """
-        self._validate_position_inputs(capital, risk_amount, entry_price, stop_loss)
-
         try:
-            # Calculate stop distance
-            stop_distance = abs(entry_price - stop_loss)
-            if stop_distance == 0:
-                raise ValueError("Stop distance cannot be zero")
+            # Validate inputs
+            if account_size <= 0:
+                raise ValueError("Account size must be positive")
+            if risk_amount <= 0:
+                raise ValueError("Risk amount must be positive")
+            if stop_loss <= 0:
+                raise ValueError("Stop loss must be positive")
 
-            # Calculate raw position size
-            risk_adjusted = risk_amount * volatility_factor
-            position_size = risk_adjusted / stop_distance
+            # Calculate risk amount in dollars
+            risk_dollars = account_size * (risk_amount / 100)
+
+            # Calculate position size
+            position_size = risk_dollars / stop_loss
 
             # Apply limits
             position_size = min(
                 position_size,
                 self.params.max_position_size,
-                capital * 0.5  # Max 50% of capital
+                account_size * 0.5  # Max 50% of capital
             )
             position_size = max(
                 position_size,
                 self.params.min_position_size
             )
 
-            return round(position_size, 2)
+            return round(position_size)  # Round to whole shares
 
         except Exception as e:
             self.logger.error(f"Position size calculation failed: {str(e)}")
