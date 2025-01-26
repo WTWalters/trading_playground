@@ -41,22 +41,26 @@ async def test_backtest_with_commission(backtest_engine):
     - Impact on profits
     - Trade execution
     """
-    # Create specific data that will trigger trades
-    dates = pd.date_range(start='2023-01-01', periods=10)
-    test_data = pd.DataFrame({
-        'open':  [100, 102, 104, 103, 102, 103, 105, 107, 106, 105],
-        'high':  [102, 104, 105, 104, 103, 105, 107, 108, 107, 106],
-        'low':   [99,  101, 103, 102, 101, 102, 104, 106, 105, 104],
-        'close': [101, 103, 104, 102, 102, 104, 106, 107, 106, 105],
-        'volume': [10000] * 10
-    }, index=dates)
+    # Create larger dataset to meet minimum points requirement
+        dates = pd.date_range(start='2023-01-01', periods=30)  # Increased from 10
+        test_data = pd.DataFrame({
+            'open':  [100 + i * 0.5 for i in range(30)],  # Trending up to ensure trades
+            'high':  [100 + i * 0.5 + 1 for i in range(30)],
+            'low':   [100 + i * 0.5 - 1 for i in range(30)],
+            'close': [100 + i * 0.5 + 0.2 for i in range(30)],
+            'volume': [10000] * 30
+        }, index=dates)
+
+    # Configure backtest with smaller minimum data requirement
+        backtest_engine.config.minimum_data_points = 10  # Reduce minimum requirement
+
 
     results = await backtest_engine.run_test(
-        data=test_data,
-        initial_capital=10000,
-        risk_per_trade=0.02,
-        commission=0.001  # 0.1% commission
-    )
+            data=test_data,
+            initial_capital=10000,
+            risk_per_trade=0.02,
+            commission=0.001
+        )
 
     # Verify commission impact
     assert results['total_commission'] > 0
