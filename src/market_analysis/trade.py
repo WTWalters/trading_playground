@@ -49,9 +49,9 @@ class Trade:
             raise ValueError("Position size must be positive")
         if self.entry_price <= 0:
             raise ValueError("Entry price must be positive")
-        if self.stop_loss <= 0:
+        if self.stop_loss and self.stop_loss <= 0:  # Only validate if provided
             raise ValueError("Stop loss must be positive")
-        if self.take_profit <= 0:
+        if self.take_profit and self.take_profit <= 0:  # Only validate if provided
             raise ValueError("Take profit must be positive")
 
     def calculate_profit(self) -> float:
@@ -59,17 +59,8 @@ class Trade:
         if self.exit_price is None:
             return 0.0
 
-        # Direction multiplier
         multiplier = 1 if self.direction == TradeDirection.LONG else -1
-
-        # Calculate gross profit
-        gross_profit = (
-            (self.exit_price - self.entry_price) *
-            self.position_size *
-            multiplier
-        )
-
-        # Subtract commission
+        gross_profit = (self.exit_price - self.entry_price) * self.position_size * multiplier
         return gross_profit - (self.commission or 0)
 
     def is_winning_trade(self) -> bool:
@@ -126,16 +117,8 @@ class TradeTracker:
             take_profit: Take profit price level
             commission: Trading commission
             risk_amount: Amount risked on trade
-
-        Raises:
-            ValueError: If trade parameters are invalid
         """
         try:
-            # Validate inputs
-            self._validate_trade_inputs(
-                entry_price, exit_price, position_size, stop_loss, take_profit
-            )
-
             # Set default timestamps
             entry_time = entry_time or datetime.now()
             exit_time = exit_time or datetime.now()
@@ -144,7 +127,7 @@ class TradeTracker:
             if isinstance(direction, str):
                 direction = TradeDirection[direction.upper()]
 
-            # Create and validate trade
+            # Create trade object
             trade = Trade(
                 entry_price=entry_price,
                 exit_price=exit_price,
@@ -152,14 +135,13 @@ class TradeTracker:
                 exit_time=exit_time,
                 position_size=position_size,
                 direction=direction,
-                stop_loss=stop_loss,
-                take_profit=take_profit,
+                stop_loss=stop_loss or entry_price * 0.99,  # Default stop loss
+                take_profit=take_profit or entry_price * 1.02,  # Default take profit
                 status=TradeStatus.CLOSED,
                 commission=commission,
                 risk_amount=risk_amount
             )
 
-            # Calculate profit and add to list
             trade.profit = trade.calculate_profit()
             self.trades.append(trade)
 
@@ -167,37 +149,14 @@ class TradeTracker:
             self.logger.error(f"Failed to add trade: {str(e)}")
             raise
 
-    def _validate_trade_inputs(
-        self,
-        entry_price: float,
-        exit_price: float,
-        position_size: int,
-        stop_loss: float,
-        take_profit: float
-    ) -> None:
-        """Validate trade parameters"""
-        if entry_price <= 0:
-            raise ValueError("Entry price must be positive")
-        if exit_price <= 0:
-            raise ValueError("Exit price must be positive")
-        if position_size <= 0:
-            raise ValueError("Position size must be positive")
-        if stop_loss <= 0:
-            raise ValueError("Stop loss must be positive")
-        if take_profit <= 0:
-            raise ValueError("Take profit must be positive")
-
     def get_metrics(self) -> Dict[str, Any]:
         """Calculate comprehensive performance metrics"""
         if not self.trades:
             return self._empty_metrics()
 
         try:
-            # Get all valid profits and durations
             profits = [t.profit for t in self.trades if t.profit is not None]
             durations = [t.get_duration() for t in self.trades if t.get_duration()]
-
-            # Calculate winning and losing trades
             winning_trades = [p for p in profits if p > 0]
             losing_trades = [p for p in profits if p < 0]
 
@@ -221,4 +180,92 @@ class TradeTracker:
             self.logger.error(f"Failed to calculate metrics: {str(e)}")
             return self._empty_metrics()
 
-    # ... (rest of the methods remain the same, just ensure consistent error handling)
+    def get_risk_metrics(self) -> Dict[str, float]:
+        """Calculate risk-related metrics"""
+        if not self.trades:
+            return {
+                'risk_reward_ratio': 0.0,
+                'avg_risk_per_trade': 0.0,
+                'max_drawdown': 0.0
+            }
+
+        try:
+            total_profit = sum(t.profit for t in self.trades if t.profit)
+            total_risk = sum(t.risk_amount for t in self.trades if t.risk_amount)
+            risk_reward = total_profit / total_risk if total_risk > 0 else 0.0
+
+            return {
+                'risk_reward_ratio': risk_reward,
+                'avg_risk_per_trade': total_risk / len(self.trades) if self.trades else 0.0,
+                'max_drawdown': self._calculate_max_drawdown()
+            }
+
+        except Exception as e:
+            self.logger.error(f"Failed to calculate risk metrics: {str(e)}")
+            return {
+                'risk_reward_ratio': 0.0,
+                'avg_risk_per_trade': 0.0,
+                'max_drawdown': 0.0
+            }
+
+    def _calculate_profit_factor(self) -> float:
+        """Calculate profit factor (gross profit / gross loss)"""
+        gross_profit = sum(t.profit for t in self.trades if t.profit and t.profit > 0)
+        gross_loss = abs(sum(t.profit for t in self.trades if t.profit and t.profit < 0))
+        return gross_profit / gross_loss if gross_loss != 0 else 0
+
+    def _calculate_max_drawdown(self) -> float:
+        """Calculate maximum peak-to-trough decline"""
+        if not self.trades:
+            return 0.0
+
+        equity = 0
+        peak = 0
+        max_dd = 0
+
+        for trade in self.trades:
+            if trade.profit:
+                equity += trade.profit
+                if equity > peak:
+                    peak = equity
+                dd = (peak - equity) / peak if peak > 0 else 0
+                max_dd = max(max_dd, dd)
+
+        return max_dd
+
+    def _empty_metrics(self) -> Dict:
+        """Return empty metrics structure"""
+        return {
+            'total_trades': 0,
+            'winning_trades': 0,
+            'losing_trades': 0,
+            'win_rate': 0.0,
+            'total_profit': 0.0,
+            'average_profit': 0.0,
+            'largest_win': 0.0,
+            'largest_loss': 0.0,
+            'avg_trade_duration': timedelta(),
+            'profit_factor': 0.0
+        }
+
+    def get_max_consecutive_wins(self) -> int:
+        """Calculate maximum consecutive winning trades"""
+        max_streak = current_streak = 0
+        for trade in self.trades:
+            if trade.is_winning_trade():
+                current_streak += 1
+                max_streak = max(max_streak, current_streak)
+            else:
+                current_streak = 0
+        return max_streak
+
+    def get_max_consecutive_losses(self) -> int:
+        """Calculate maximum consecutive losing trades"""
+        max_streak = current_streak = 0
+        for trade in self.trades:
+            if not trade.is_winning_trade():
+                current_streak += 1
+                max_streak = max(max_streak, current_streak)
+            else:
+                current_streak = 0
+        return max_streak
