@@ -1,10 +1,10 @@
 # src/market_analysis/backtest.py
 
 from dataclasses import dataclass
-from typing import Dict, Callable, Optional, List, Any
+from typing import Dict, Callable, Optional, List, Tuple, Any
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from .base import AnalysisConfig, MarketRegime
 from .risk import RiskManager

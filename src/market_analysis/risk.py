@@ -1,6 +1,6 @@
 # src/market_analysis/risk.py
 
-from typing import Dict, Optional, Union, Tuple, List
+from typing import Dict, Optional, Union, Tuple, List, Any
 from dataclasses import dataclass
 from enum import Enum
 import logging
