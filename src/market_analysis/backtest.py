@@ -1,9 +1,10 @@
 # src/market_analysis/backtest.py
 
-from typing import Dict, Callable, Optional, List, Tuple, Any
+from dataclasses import dataclass
+from typing import Dict, Callable, Optional, List, Any
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 import logging
 from .base import AnalysisConfig, MarketRegime
 from .risk import RiskManager
@@ -11,36 +12,40 @@ from .trade import Trade, TradeTracker, TradeDirection, TradeStatus
 from .volatility import VolatilityAnalyzer
 from .trend import TrendAnalyzer
 
+@dataclass
+class BacktestResults:
+    """Container for backtest results"""
+    final_capital: float
+    total_return: float
+    trade_metrics: Dict[str, Any]
+    equity_curve: pd.DataFrame
+    total_commission: float
+    strategy_signals: List[str]
+    total_trades: int
+    win_rate: float
+    max_drawdown: float
+    volatility_metrics: Dict[str, Any]
+
 class SimpleBacktest:
     """
-    Simple backtesting engine for strategy testing
+    A simple backtesting engine for trading strategy evaluation.
 
-    Features:
-    - Historical data backtesting
-    - Commission handling
-    - Risk management
-    - Position tracking
-    - Performance analysis
-    - Multiple strategy support
-    - Volatility and trend analysis
+    Attributes:
+        config: Configuration parameters
+        risk_manager: Handles position sizing and risk calculations
+        trade_tracker: Tracks and analyzes trades
+        volatility_analyzer: Analyzes market volatility
+        trend_analyzer: Analyzes market trends
     """
 
     def __init__(self, config: AnalysisConfig):
-        """
-        Initialize backtesting engine
-
-        Args:
-            config: Configuration parameters for analysis
-        """
         self.config = config
         self.risk_manager = RiskManager()
         self.trade_tracker = TradeTracker()
-        self.logger = logging.getLogger(__name__)
-        self.current_position: Optional[Trade] = None
-
-        # Initialize market analyzers
         self.volatility_analyzer = VolatilityAnalyzer(config)
         self.trend_analyzer = TrendAnalyzer(config)
+        self.logger = logging.getLogger(__name__)
+        self.current_position: Optional[Trade] = None
 
     async def run_test(
         self,
@@ -48,84 +53,54 @@ class SimpleBacktest:
         initial_capital: float,
         risk_per_trade: float = 0.02,
         commission: float = 0.0,
-        strategy: Optional[Callable] = None
-    ) -> Dict[str, Any]:
+    ) -> BacktestResults:
         """
-        Run backtest on historical data
+        Execute backtest on historical data.
 
         Args:
-            data: OHLCV DataFrame with datetime index
-            initial_capital: Starting capital amount
-            risk_per_trade: Fraction of capital to risk per trade (0.02 = 2%)
-            commission: Commission rate per trade (0.001 = 0.1%)
-            strategy: Optional custom strategy function
+            data: Historical price data (OHLCV)
+            initial_capital: Starting capital
+            risk_per_trade: Risk per trade (as decimal)
+            commission: Commission rate (as decimal)
 
         Returns:
-            Dictionary containing:
-            - final_capital: Ending capital
-            - total_return: Percentage return
-            - trade_metrics: Detailed trade statistics
-            - equity_curve: Capital evolution over time
-            - total_commission: Total commission paid
-            - strategy_signals: List of trading signals
-            - total_trades: Number of trades executed
-            - win_rate: Percentage of winning trades
-            - max_drawdown: Maximum peak-to-trough decline
-            - volatility_metrics: Volatility analysis results
+            BacktestResults containing performance metrics
         """
         try:
-            results = self._initialize_backtest()
-            current_capital = initial_capital
-            equity_curve = []
+            self._validate_inputs(data, initial_capital, risk_per_trade, commission)
 
-            # Get initial analysis
-            vol_metrics = await self.volatility_analyzer.analyze(data)
-
-            # Validate data requirements
-            if len(data) < self.config.minimum_data_points:
-                self.logger.warning(f"Insufficient data points: {len(data)}")
-                return self._get_empty_results(initial_capital)
+            results = {
+                'current_capital': initial_capital,
+                'commission': 0.0,
+                'signals': [],
+                'trades': [],
+                'equity_curve': []
+            }
 
             # Process each bar
             for i in range(len(data) - 1):
-                current_data = data.iloc[:i+1]
-                next_bar = data.iloc[i+1]
+                current_bar = data.iloc[i]
+                next_bar = data.iloc[i + 1]
+                timestamp = data.index[i]
 
-                # Process current bar
-                position_update = await self._process_bar(
-                    current_data=current_data,
+                # Update results with new bar
+                results = await self._process_bar(
+                    current_bar=current_bar,
                     next_bar=next_bar,
-                    timestamp=data.index[i+1],
-                    current_capital=current_capital,
+                    timestamp=timestamp,
+                    results=results,
                     risk_per_trade=risk_per_trade,
-                    commission=commission,
-                    strategy=strategy
+                    commission=commission
                 )
 
-                # Update tracking variables
-                current_capital = position_update['current_capital']
-                results['commission'] += position_update['commission']
-                results['signals'].append(position_update['signal'])
-
-                # Record equity curve
-                equity_curve.append({
-                    'date': data.index[i+1],
-                    'capital': current_capital,
-                    'signal': position_update['signal']
-                })
-
-            # Calculate final results
-            results['equity_curve'] = equity_curve
+            # Calculate final metrics
             final_results = self._calculate_final_results(
                 results=results,
                 initial_capital=initial_capital,
-                final_capital=current_capital
+                data=data
             )
 
-            # Add volatility metrics
-            final_results['volatility_metrics'] = vol_metrics.get('metrics', {})
-
-            return final_results
+            return BacktestResults(**final_results)
 
         except Exception as e:
             self.logger.error(f"Backtest failed: {str(e)}")
@@ -133,244 +108,225 @@ class SimpleBacktest:
 
     async def _process_bar(
         self,
-        current_data: pd.DataFrame,
+        current_bar: pd.Series,
         next_bar: pd.Series,
         timestamp: datetime,
-        current_capital: float,
+        results: Dict[str, Any],
         risk_per_trade: float,
-        commission: float,
-        strategy: Optional[Callable]
+        commission: float
     ) -> Dict[str, Any]:
-        """
-        Process a single bar of market data
+        """Process single price bar and update positions"""
 
-        Args:
-            current_data: Historical data up to current point
-            next_bar: Next bar's data for execution
-            timestamp: Current timestamp
-            current_capital: Current account capital
-            risk_per_trade: Risk per trade setting
-            commission: Commission rate
-            strategy: Optional strategy function
-
-        Returns:
-            Dictionary containing position updates
-        """
-        # Run market analysis
-        vol_result = await self.volatility_analyzer.analyze(current_data)
-        trend_result = await self.trend_analyzer.analyze(current_data)
-
-        # Generate trading signal
-        signal = self._generate_signal(vol_result, trend_result, strategy)
-
-        # Update positions based on signal
-        position_update = self._update_positions(
-            signal=signal,
-            bar_data=next_bar,
-            timestamp=timestamp,
-            capital=current_capital,
-            risk_per_trade=risk_per_trade,
-            commission=commission
+        # Get market analysis
+        vol_analysis = await self.volatility_analyzer.analyze(
+            pd.DataFrame([current_bar])
+        )
+        trend_analysis = await self.trend_analyzer.analyze(
+            pd.DataFrame([current_bar])
         )
 
-        return {
-            'current_capital': position_update['new_capital'],
-            'commission': position_update['commission'],
+        # Generate trading signal
+        signal = self._generate_signal(vol_analysis, trend_analysis)
+        results['signals'].append(signal)
+
+        # Handle position management
+        if signal == "BUY" and self.current_position is None:
+            # Enter new position
+            position = self._enter_position(
+                price=next_bar['open'],
+                timestamp=timestamp,
+                capital=results['current_capital'],
+                risk_amount=risk_per_trade * results['current_capital'],
+                commission=commission
+            )
+
+            if position:
+                self.current_position = position
+                results['commission'] += position.commission
+                results['current_capital'] -= position.commission
+
+        elif (signal == "SELL" or
+              (self.current_position and
+               self._should_exit_position(self.current_position, next_bar))):
+            # Exit current position
+            if self.current_position:
+                exit_results = self._exit_position(
+                    position=self.current_position,
+                    price=next_bar['open'],
+                    timestamp=timestamp,
+                    commission=commission
+                )
+
+                results['commission'] += exit_results['commission']
+                results['current_capital'] = exit_results['new_capital']
+                results['trades'].append(self.current_position)
+                self.current_position = None
+
+        # Record equity curve
+        results['equity_curve'].append({
+            'timestamp': timestamp,
+            'capital': results['current_capital'],
             'signal': signal
-        }
+        })
+
+        return results
 
     def _generate_signal(
         self,
-        vol_result: Dict[str, Any],
-        trend_result: Dict[str, Any],
-        strategy: Optional[Callable]
+        volatility: Dict[str, Any],
+        trend: Dict[str, Any]
     ) -> str:
-        """
-        Generate trading signal based on analysis
+        """Generate trading signal based on analysis"""
 
-        Args:
-            vol_result: Volatility analysis results
-            trend_result: Trend analysis results
-            strategy: Optional custom strategy
+        if (volatility['regime'] == 'low_volatility' and
+            trend['regime'] == MarketRegime.TRENDING_UP):
+            return "BUY"
+        elif volatility['regime'] == 'high_volatility':
+            return "SELL"
+        return "HOLD"
 
-        Returns:
-            Trading signal ('BUY', 'SELL', or 'HOLD')
-        """
-        if strategy:
-            return strategy(vol_result, trend_result)
-
-        # Default strategy logic
-        if (vol_result and trend_result and
-            vol_result.get('metrics', {}).get('volatility_regime') == 'low_volatility' and
-            trend_result.get('regime') == MarketRegime.TRENDING_UP):
-            return 'BUY'
-        elif vol_result and vol_result.get('metrics', {}).get('volatility_regime') == 'high_volatility':
-            return 'SELL'
-        return 'HOLD'
-
-    def _update_positions(
+    def _enter_position(
         self,
-        signal: str,
-        bar_data: pd.Series,
+        price: float,
         timestamp: datetime,
         capital: float,
-        risk_per_trade: float,
+        risk_amount: float,
         commission: float
-    ) -> Dict[str, float]:
-        """
-        Update positions based on signals and market data
-
-        Args:
-            signal: Trading signal
-            bar_data: Current bar data
-            timestamp: Current timestamp
-            capital: Current capital
-            risk_per_trade: Risk per trade setting
-            commission: Commission rate
-
-        Returns:
-            Dictionary with position updates
-        """
-        total_commission = 0.0
-        new_capital = capital
+    ) -> Optional[Trade]:
+        """Create new trading position"""
 
         try:
-            # Handle position entry
-            if self.current_position is None and signal == 'BUY':
-                entry_price = bar_data['open']
-                stop_loss = entry_price * 0.99  # 1% stop loss
+            # Calculate position parameters
+            stop_loss = price * 0.99  # 1% stop loss
+            position_size = self.risk_manager.calculate_position_size(
+                capital=capital,
+                risk_amount=risk_amount,
+                entry_price=price,
+                stop_loss=stop_loss
+            )
 
-                # Calculate position size
-                position_size = self.risk_manager.calculate_position_size(
-                    capital=capital,
-                    risk_amount=capital * risk_per_trade,
-                    entry_price=entry_price,
-                    stop_loss=stop_loss
-                )
+            # Calculate commission
+            entry_commission = price * position_size * commission
 
-                # Calculate and apply commission
-                entry_commission = entry_price * position_size * commission
-                total_commission += entry_commission
-                new_capital -= entry_commission
-
-                # Open new position
-                self.current_position = Trade(
-                    entry_price=entry_price,
-                    exit_price=None,
-                    entry_time=timestamp,
-                    exit_time=None,
-                    position_size=position_size,
-                    direction=TradeDirection.LONG,
-                    stop_loss=stop_loss,
-                    take_profit=entry_price * 1.02,  # 2% take profit
-                    status=TradeStatus.OPEN,
-                    commission=entry_commission,
-                    risk_amount=position_size * (entry_price - stop_loss)
-                )
-
-            # Handle position exit
-            elif self.current_position and (
-                signal == 'SELL' or
-                bar_data['low'] < self.current_position.stop_loss or
-                bar_data['high'] > self.current_position.take_profit
-            ):
-                exit_price = bar_data['open']
-                exit_commission = exit_price * self.current_position.position_size * commission
-                total_commission += exit_commission
-
-                # Update position details
-                self.current_position.exit_price = exit_price
-                self.current_position.exit_time = timestamp
-                self.current_position.status = TradeStatus.CLOSED
-                self.current_position.commission += exit_commission
-
-                # Calculate P&L and update capital
-                trade_profit = self.current_position.calculate_profit()
-                new_capital += trade_profit - exit_commission
-
-                # Record trade
-                self.trade_tracker.trades.append(self.current_position)
-                self.current_position = None
+            return Trade(
+                entry_price=price,
+                entry_time=timestamp,
+                position_size=position_size,
+                direction=TradeDirection.LONG,
+                stop_loss=stop_loss,
+                take_profit=price * 1.02,  # 2% take profit
+                status=TradeStatus.OPEN,
+                commission=entry_commission
+            )
 
         except Exception as e:
-            self.logger.error(f"Position update failed: {str(e)}")
+            self.logger.error(f"Position entry failed: {str(e)}")
+            return None
 
-        return {
-            'new_capital': new_capital,
-            'commission': total_commission
-        }
+    def _exit_position(
+        self,
+        position: Trade,
+        price: float,
+        timestamp: datetime,
+        commission: float
+    ) -> Dict[str, float]:
+        """Exit trading position"""
+
+        try:
+            exit_commission = price * position.position_size * commission
+
+            position.exit_price = price
+            position.exit_time = timestamp
+            position.status = TradeStatus.CLOSED
+            position.commission += exit_commission
+
+            profit = position.calculate_profit()
+            new_capital = position.calculate_new_capital(profit, exit_commission)
+
+            return {
+                'commission': exit_commission,
+                'new_capital': new_capital
+            }
+
+        except Exception as e:
+            self.logger.error(f"Position exit failed: {str(e)}")
+            return {
+                'commission': 0.0,
+                'new_capital': position.entry_capital
+            }
 
     def _calculate_final_results(
         self,
         results: Dict[str, Any],
         initial_capital: float,
-        final_capital: float
+        data: pd.DataFrame
     ) -> Dict[str, Any]:
-        """
-        Calculate final backtest results
+        """Calculate final backtest metrics"""
 
-        Args:
-            results: Raw backtest results
-            initial_capital: Starting capital
-            final_capital: Ending capital
-
-        Returns:
-            Dictionary containing final metrics
-        """
-        # Create equity curve DataFrame
         equity_curve = pd.DataFrame(results['equity_curve'])
-        if not equity_curve.empty:
-            equity_curve.set_index('date', inplace=True)
 
-            # Calculate drawdown
-            peak = equity_curve['capital'].expanding(min_periods=1).max()
-            drawdown = (peak - equity_curve['capital']) / peak
+        if not equity_curve.empty:
+            equity_curve.set_index('timestamp', inplace=True)
+            drawdown = self._calculate_drawdown(equity_curve['capital'])
             max_drawdown = float(drawdown.max())
         else:
             max_drawdown = 0.0
 
-        # Get trading metrics
-        metrics = self.trade_tracker.get_metrics()
-
         return {
-            'final_capital': final_capital,
-            'total_return': (final_capital - initial_capital) / initial_capital,
-            'trade_metrics': metrics,
+            'final_capital': results['current_capital'],
+            'total_return': (results['current_capital'] - initial_capital) / initial_capital,
+            'trade_metrics': self.trade_tracker.get_metrics(),
             'equity_curve': equity_curve,
             'total_commission': results['commission'],
             'strategy_signals': results['signals'],
-            'total_trades': len(self.trade_tracker.trades),
-            'win_rate': metrics.get('win_rate', 0.0),
-            'max_drawdown': max_drawdown
+            'total_trades': len(results['trades']),
+            'win_rate': self._calculate_win_rate(results['trades']),
+            'max_drawdown': max_drawdown,
+            'volatility_metrics': self.volatility_analyzer.get_metrics(data)
         }
 
-    def _initialize_backtest(self) -> Dict[str, Any]:
-        """Initialize backtest tracking variables"""
-        return {
-            'signals': [],
-            'commission': 0.0,
-            'equity_curve': []
-        }
+    @staticmethod
+    def _calculate_drawdown(equity_curve: pd.Series) -> pd.Series:
+        """Calculate drawdown series"""
+        peak = equity_curve.expanding(min_periods=1).max()
+        return (peak - equity_curve) / peak
 
-    def _get_empty_results(self, initial_capital: float) -> Dict[str, Any]:
-        """
-        Return empty results structure
+    @staticmethod
+    def _calculate_win_rate(trades: List[Trade]) -> float:
+        """Calculate win rate from trades"""
+        if not trades:
+            return 0.0
+        winning_trades = sum(1 for trade in trades if trade.profit > 0)
+        return winning_trades / len(trades)
 
-        Args:
-            initial_capital: Starting capital amount
+    def _validate_inputs(
+        self,
+        data: pd.DataFrame,
+        initial_capital: float,
+        risk_per_trade: float,
+        commission: float
+    ) -> None:
+        """Validate backtest inputs"""
+        if len(data) < self.config.minimum_data_points:
+            raise ValueError(f"Insufficient data points: {len(data)}")
+        if initial_capital <= 0:
+            raise ValueError("Initial capital must be positive")
+        if not 0 <= risk_per_trade <= 1:
+            raise ValueError("Risk per trade must be between 0 and 1")
+        if not 0 <= commission <= 1:
+            raise ValueError("Commission must be between 0 and 1")
 
-        Returns:
-            Dictionary with default values
-        """
-        return {
-            'final_capital': initial_capital,
-            'total_return': 0.0,
-            'trade_metrics': self.trade_tracker.get_metrics(),
-            'equity_curve': pd.DataFrame(),
-            'total_commission': 0.0,
-            'strategy_signals': [],
-            'total_trades': 0,
-            'win_rate': 0.0,
-            'max_drawdown': 0.0,
-            'volatility_metrics': {}
-        }
+    def _get_empty_results(self, initial_capital: float) -> BacktestResults:
+        """Return empty results structure"""
+        return BacktestResults(
+            final_capital=initial_capital,
+            total_return=0.0,
+            trade_metrics={},
+            equity_curve=pd.DataFrame(),
+            total_commission=0.0,
+            strategy_signals=[],
+            total_trades=0,
+            win_rate=0.0,
+            max_drawdown=0.0,
+            volatility_metrics={}
+        )

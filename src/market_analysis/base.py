@@ -8,127 +8,120 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import logging
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 # Type variables for generic types
 T = TypeVar('T')
 MetricsType = TypeVar('MetricsType', bound='BaseMetrics')
 
 class MarketRegime(Enum):
-    """
-    Market regime classification
-
-    Defines different market states:
-    - TRENDING_UP: Clear upward trend
-    - TRENDING_DOWN: Clear downward trend
-    - RANGING: Sideways movement
-    - VOLATILE: High volatility
-    - UNKNOWN: Undefined state
-    """
+    """Market regime classification"""
     TRENDING_UP = "trending_up"
     TRENDING_DOWN = "trending_down"
     RANGING = "ranging"
     VOLATILE = "volatile"
     UNKNOWN = "unknown"
 
-class AnalysisConfig(BaseModel):
-    """
-    Configuration settings for market analysis
+    @classmethod
+    def from_string(cls, value: str) -> 'MarketRegime':
+        """Convert string to MarketRegime enum"""
+        try:
+            return cls(value.lower())
+        except ValueError:
+            return cls.UNKNOWN
 
-    Attributes:
-        volatility_window: Period for volatility calculations (default: 10)
-        trend_strength_threshold: Minimum threshold for trend confirmation (default: 0.1)
-        volatility_threshold: Threshold for volatility regime changes (default: 0.02)
-        outlier_std_threshold: Standard deviations for outlier detection (default: 3.0)
-        minimum_data_points: Minimum required data points (default: 10)
-    """
-    volatility_window: int = Field(default=10, ge=5, le=50)
+class AnalysisConfig(BaseModel):
+    """Configuration settings for market analysis"""
+
+    # Time windows
+    volatility_window: int = Field(default=20, ge=5, le=100)
+    trend_window: int = Field(default=20, ge=5, le=100)
+    momentum_window: int = Field(default=14, ge=5, le=50)
+
+    # Thresholds
     trend_strength_threshold: float = Field(default=0.1, ge=0.0, le=1.0)
     volatility_threshold: float = Field(default=0.02, ge=0.0, le=0.1)
+    momentum_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
     outlier_std_threshold: float = Field(default=3.0, ge=1.0, le=5.0)
-    minimum_data_points: int = Field(default=10, ge=5, le=100)
+
+    # Data requirements
+    minimum_data_points: int = Field(default=30, ge=10, le=200)
+
+    # Analysis parameters
+    use_log_returns: bool = Field(default=True)
+    volatility_scaling: bool = Field(default=True)
+
+    @validator('trend_window')
+    def validate_trend_window(cls, v, values):
+        """Ensure trend window is appropriate"""
+        if 'volatility_window' in values and v < values['volatility_window']:
+            raise ValueError("Trend window should be >= volatility window")
+        return v
 
     class Config:
-        """Pydantic config"""
+        """Pydantic model configuration"""
         validate_assignment = True
         arbitrary_types_allowed = True
+        extra = "allow"
 
 class BaseMetrics(Protocol):
-    """Protocol defining interface for metrics classes"""
+    """Protocol for metrics classes"""
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert metrics to dictionary"""
+        ...
+
+    def validate(self) -> bool:
+        """Validate metric values"""
+        ...
+
     def get(self, key: str, default: Any = None) -> Any:
-        """Get metric value safely"""
+        """Get metric value with default"""
         ...
 
 @dataclass
-class VolatilityMetrics:
-    """
-    Container for volatility-related metrics
+class AnalysisMetrics:
+    """Base class for analysis metrics"""
 
-    Attributes:
-        historical_volatility: Rolling volatility measure
-        normalized_atr: ATR normalized by price
-        volatility_regime: Current volatility classification
-        zscore: Standardized volatility score
-    """
-    historical_volatility: float
-    normalized_atr: float
-    volatility_regime: str
-    zscore: float
+    timestamp: datetime
+    metrics: Dict[str, Any]
+    regime: MarketRegime
+    confidence: float
 
-    def get(self, key: str, default: Any = None) -> Any:
-        """
-        Get attribute value safely with default
-
-        Args:
-            key: Attribute name to retrieve
-            default: Default value if attribute doesn't exist
-
-        Returns:
-            Attribute value or default
-        """
-        return getattr(self, key, default)
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation"""
+        return {
+            'timestamp': self.timestamp,
+            'metrics': self.metrics,
+            'regime': self.regime.value,
+            'confidence': self.confidence
+        }
 
     def validate(self) -> bool:
-        """
-        Validate metric values
-
-        Returns:
-            bool: True if all metrics are valid
-        """
-        return all([
-            isinstance(self.historical_volatility, (int, float)),
-            isinstance(self.normalized_atr, (int, float)),
-            isinstance(self.volatility_regime, str),
-            isinstance(self.zscore, (int, float))
-        ])
+        """Validate metric values"""
+        return (
+            isinstance(self.timestamp, datetime) and
+            isinstance(self.metrics, dict) and
+            isinstance(self.regime, MarketRegime) and
+            0 <= self.confidence <= 1
+        )
 
 class MarketAnalyzer(ABC):
-    """
-    Abstract base class for market analyzers
-
-    Provides:
-    - Common initialization
-    - Data validation
-    - Abstract analysis interface
-    - Logging functionality
-    """
+    """Abstract base class for market analyzers"""
 
     def __init__(self, config: AnalysisConfig):
-        """
-        Initialize analyzer with configuration
-
-        Args:
-            config: Analysis parameters and settings
-        """
+        """Initialize analyzer"""
         self.config = config
         self.logger = logging.getLogger(self.__class__.__name__)
+        self._last_analysis: Optional[AnalysisMetrics] = None
+        self._analysis_history: List[AnalysisMetrics] = []
 
     @abstractmethod
     async def analyze(
         self,
         data: pd.DataFrame,
         additional_metrics: Optional[Dict] = None
-    ) -> Dict[str, Union[float, str, pd.Series, BaseMetrics]]:
+    ) -> AnalysisMetrics:
         """
         Analyze market data
 
@@ -137,31 +130,40 @@ class MarketAnalyzer(ABC):
             additional_metrics: Optional metrics from other analyzers
 
         Returns:
-            Dictionary containing analysis results
+            Analysis metrics
+
+        Raises:
+            ValueError: If data validation fails
         """
-        pass
+        if not self._validate_input(data):
+            raise ValueError("Invalid input data")
+
+        # Store analysis timestamp
+        timestamp = data.index[-1] if isinstance(data.index, pd.DatetimeIndex) else datetime.now()
+
+        return AnalysisMetrics(
+            timestamp=timestamp,
+            metrics={},
+            regime=MarketRegime.UNKNOWN,
+            confidence=0.0
+        )
 
     def _validate_input(self, data: pd.DataFrame) -> bool:
         """
-        Validate input data structure and sufficiency
+        Validate input data
 
         Args:
-            data: OHLCV DataFrame to validate
+            data: OHLCV DataFrame
 
         Returns:
             bool: True if data is valid
-
-        Checks:
-        - Required columns present
-        - Sufficient data points
-        - No missing values
         """
         try:
             required_columns = ['open', 'high', 'low', 'close', 'volume']
 
-            # Check required columns
+            # Check columns
             if not all(col in data.columns for col in required_columns):
-                missing = [col for col in required_columns if col not in data.columns]
+                missing = set(required_columns) - set(data.columns)
                 self.logger.error(f"Missing columns: {missing}")
                 return False
 
@@ -178,59 +180,79 @@ class MarketAnalyzer(ABC):
                 self.logger.error("Data contains missing values")
                 return False
 
+            # Check index
+            if not isinstance(data.index, pd.DatetimeIndex):
+                self.logger.error("DataFrame index must be datetime")
+                return False
+
             return True
 
         except Exception as e:
             self.logger.error(f"Data validation failed: {str(e)}")
             return False
 
-class AnalysisOrchestrator:
-    """
-    Coordinates multiple market analyzers
+    def get_last_analysis(self) -> Optional[AnalysisMetrics]:
+        """Get most recent analysis results"""
+        return self._last_analysis
 
-    Features:
-    - Analyzer management
-    - Sequential execution
-    - Results aggregation
-    - Error handling
-    """
+    def get_analysis_history(
+        self,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None
+    ) -> List[AnalysisMetrics]:
+        """
+        Get historical analysis results
+
+        Args:
+            start: Optional start datetime
+            end: Optional end datetime
+
+        Returns:
+            List of analysis metrics
+        """
+        history = self._analysis_history
+
+        if start:
+            history = [m for m in history if m.timestamp >= start]
+        if end:
+            history = [m for m in history if m.timestamp <= end]
+
+        return history
+
+class AnalysisOrchestrator:
+    """Coordinates multiple market analyzers"""
 
     def __init__(
         self,
         analyzers: Dict[str, MarketAnalyzer],
         config: AnalysisConfig
     ):
-        """
-        Initialize orchestrator
-
-        Args:
-            analyzers: Dictionary of analyzer instances
-            config: Analysis configuration
-        """
+        """Initialize orchestrator"""
         self.analyzers = analyzers
         self.config = config
         self.logger = logging.getLogger(self.__class__.__name__)
+        self._last_results: Dict[str, AnalysisMetrics] = {}
 
     async def run_analysis(
         self,
         data: pd.DataFrame,
         analysis_types: Optional[List[str]] = None
-    ) -> Dict[str, Dict]:
+    ) -> Dict[str, AnalysisMetrics]:
         """
-        Run specified market analyses
+        Run market analysis
 
         Args:
             data: OHLCV DataFrame
             analysis_types: Optional list of analyses to run
 
         Returns:
-            Dictionary containing results from all analyzers
+            Dictionary of analysis results
         """
         try:
             results = {}
             analysis_types = analysis_types or list(self.analyzers.keys())
 
-            # Run each analyzer sequentially
+            # Sequential analysis
             for analysis_type in analysis_types:
                 if analysis_type not in self.analyzers:
                     self.logger.warning(f"Unknown analyzer: {analysis_type}")
@@ -242,6 +264,7 @@ class AnalysisOrchestrator:
                     additional_metrics=results
                 )
 
+            self._last_results = results
             return results
 
         except Exception as e:
@@ -252,8 +275,12 @@ class AnalysisOrchestrator:
         """Get list of available analyzers"""
         return list(self.analyzers.keys())
 
-    def validate_config(self) -> bool:
-        """Validate configuration settings"""
+    def get_last_results(self) -> Dict[str, AnalysisMetrics]:
+        """Get most recent analysis results"""
+        return self._last_results
+
+    def validate_setup(self) -> bool:
+        """Validate analyzer setup"""
         return all(
             isinstance(analyzer, MarketAnalyzer)
             for analyzer in self.analyzers.values()
