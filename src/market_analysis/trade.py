@@ -1,4 +1,4 @@
-Copy# src/market_analysis/trade.py
+# src/market_analysis/trade.py
 
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
@@ -33,21 +33,31 @@ class TradeStatus(Enum):
 @dataclass
 class TradeMetrics:
     """Container for trade performance metrics"""
+    # Basic trade counts and ratios
     total_trades: int = 0
     winning_trades: int = 0
     losing_trades: int = 0
     win_rate: float = 0.0
+
+    # Profit and performance metrics
     profit_factor: float = 0.0
     max_drawdown: float = 0.0
     sharpe_ratio: float = 0.0
+    average_profit: float = 0.0
+
+    # Trade size metrics
     avg_winner: float = 0.0
     avg_loser: float = 0.0
-    largest_winner: float = 0.0
-    largest_loser: float = 0.0
-    avg_trade_duration: timedelta = field(default_factory=lambda: timedelta())  # Changed from avg_duration
+    largest_win: float = 0.0
+    largest_loss: float = 0.0
+
+    # Time and risk metrics
+    avg_trade_duration: timedelta = field(default_factory=lambda: timedelta())
     avg_mae: float = 0.0  # Maximum Adverse Excursion
     avg_mfe: float = 0.0  # Maximum Favorable Excursion
     risk_reward_ratio: float = 0.0
+
+    # Streak metrics
     max_consecutive_wins: int = 0
     max_consecutive_losses: int = 0
 
@@ -90,7 +100,7 @@ class Trade:
     notes: str = ""
 
     def __post_init__(self):
-        """Validate trade parameters"""
+        """Validate trade parameters after initialization"""
         self._validate_trade_params()
         if self.exit_price:
             self.calculate_profit()
@@ -126,12 +136,8 @@ class Trade:
             self.mae = min(self.mae, self.entry_price - current_price)
             self.mfe = max(self.mfe, self.entry_price - current_price)
 
-    def close_trade(
-        self,
-        exit_price: float,
-        exit_time: Optional[datetime] = None
-    ) -> float:
-        """Close the trade"""
+    def close_trade(self, exit_price: float, exit_time: Optional[datetime] = None) -> float:
+        """Close the trade and calculate final profit"""
         self.exit_price = exit_price
         self.exit_time = exit_time or datetime.now()
         self.status = TradeStatus.CLOSED
@@ -148,7 +154,7 @@ class Trade:
         return self.profit > 0
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert trade to dictionary"""
+        """Convert trade to dictionary format"""
         return {
             'id': self.id,
             'entry_price': self.entry_price,
@@ -189,10 +195,10 @@ class TradeTracker:
         commission: float = 0.0,
         risk_amount: float = 0.0,
     ) -> None:
-        """Add trade to tracker."""
+        """Add trade to tracker"""
         try:
             if trade is None and entry_price is not None:
-                # Handle direct parameter inputs
+                # Create trade from parameters
                 trade_obj = Trade(
                     entry_price=entry_price,
                     position_size=position_size,
@@ -203,7 +209,6 @@ class TradeTracker:
                     commission=commission,
                     risk_amount=risk_amount
                 )
-                # Set status to CLOSED if exit_price is provided
                 if exit_price is not None:
                     trade_obj.status = TradeStatus.CLOSED
                     trade_obj.calculate_profit()
@@ -215,12 +220,31 @@ class TradeTracker:
                 raise ValueError("Invalid trade parameters")
 
             self.trades.append(trade_obj)
-            self._metrics = None
-            self._equity_curve = None
+            self._metrics = None  # Reset cached metrics
+            self._equity_curve = None  # Reset cached equity curve
 
         except Exception as e:
             self.logger.error(f"Failed to add trade: {str(e)}")
             raise
+
+    def get_total_profit(self) -> float:
+        """Get total profit across all closed trades"""
+        return sum(trade.profit for trade in self.trades if trade.status == TradeStatus.CLOSED)
+
+    def get_win_rate(self) -> float:
+        """Get current win rate"""
+        metrics = self.get_metrics()
+        return metrics.win_rate
+
+    def get_max_consecutive_wins(self) -> int:
+        """Get maximum consecutive winning trades"""
+        metrics = self.get_metrics()
+        return metrics.max_consecutive_wins
+
+    def get_max_consecutive_losses(self) -> int:
+        """Get maximum consecutive losing trades"""
+        metrics = self.get_metrics()
+        return metrics.max_consecutive_losses
 
     def get_metrics(self, refresh: bool = False) -> TradeMetrics:
         """Calculate trade metrics"""
@@ -245,10 +269,11 @@ class TradeTracker:
                 profit_factor=self._calculate_profit_factor(winning_trades, losing_trades),
                 max_drawdown=self._calculate_max_drawdown(),
                 sharpe_ratio=self._calculate_sharpe_ratio(profits),
+                average_profit=np.mean(profits) if profits else 0.0,
                 avg_winner=np.mean([t.profit for t in winning_trades]) if winning_trades else 0,
                 avg_loser=np.mean([t.profit for t in losing_trades]) if losing_trades else 0,
-                largest_winner=max([t.profit for t in winning_trades]) if winning_trades else 0,
-                largest_loser=min([t.profit for t in losing_trades]) if losing_trades else 0,
+                largest_win=max([t.profit for t in winning_trades]) if winning_trades else 0,
+                largest_loss=min([t.profit for t in losing_trades]) if losing_trades else 0,
                 avg_trade_duration=sum(durations, timedelta()) / len(durations) if durations else timedelta(),
                 avg_mae=np.mean([t.mae for t in closed_trades]),
                 avg_mfe=np.mean([t.mfe for t in closed_trades]),
@@ -262,16 +287,6 @@ class TradeTracker:
         except Exception as e:
             self.logger.error(f"Failed to calculate metrics: {str(e)}")
             return TradeMetrics()
-
-    def get_win_rate(self) -> float:
-        """Get current win rate"""
-        metrics = self.get_metrics()
-        return metrics.win_rate
-
-    def get_max_consecutive_wins(self) -> int:
-        """Get maximum consecutive winning trades"""
-        metrics = self.get_metrics()
-        return metrics.max_consecutive_wins
 
     def get_risk_metrics(self) -> Dict[str, float]:
         """Get risk-related metrics"""
@@ -288,45 +303,14 @@ class TradeTracker:
             'max_drawdown': metrics.max_drawdown
         }
 
-    def get_equity_curve(self, initial_capital: float = 10000.0) -> pd.Series:
-        """Generate equity curve"""
-        if self._equity_curve is not None:
-            return self._equity_curve
-
-        try:
-            closed_trades = [t for t in self.trades if t.status == TradeStatus.CLOSED]
-            if not closed_trades:
-                return pd.Series()
-
-            equity = initial_capital
-            equity_points = [(closed_trades[0].entry_time, equity)]
-
-            for trade in closed_trades:
-                equity += trade.profit
-                equity_points.append((trade.exit_time, equity))
-
-            self._equity_curve = pd.Series(
-                [p[1] for p in equity_points],
-                index=[p[0] for p in equity_points]
-            )
-            return self._equity_curve
-
-        except Exception as e:
-            self.logger.error(f"Failed to generate equity curve: {str(e)}")
-            return pd.Series()
-
-    def _calculate_profit_factor(
-        self,
-        winning_trades: List[Trade],
-        losing_trades: List[Trade]
-    ) -> float:
-        """Calculate profit factor"""
+    def _calculate_profit_factor(self, winning_trades: List[Trade], losing_trades: List[Trade]) -> float:
+        """Calculate profit factor (gross profit / gross loss)"""
         gross_profit = sum(t.profit for t in winning_trades)
         gross_loss = abs(sum(t.profit for t in losing_trades))
         return gross_profit / gross_loss if gross_loss != 0 else 0
 
     def _calculate_max_drawdown(self) -> float:
-        """Calculate maximum drawdown"""
+        """Calculate maximum drawdown percentage"""
         equity_curve = self.get_equity_curve()
         if equity_curve.empty:
             return 0.0
@@ -367,6 +351,33 @@ class TradeTracker:
                 current_streak = 0
 
         return max_streak
+
+    def get_equity_curve(self, initial_capital: float = 10000.0) -> pd.Series:
+        """Generate equity curve"""
+        if self._equity_curve is not None:
+            return self._equity_curve
+
+        try:
+            closed_trades = [t for t in self.trades if t.status == TradeStatus.CLOSED]
+            if not closed_trades:
+                return pd.Series()
+
+            equity = initial_capital
+            equity_points = [(closed_trades[0].entry_time, equity)]
+
+            for trade in closed_trades:
+                equity += trade.profit
+                equity_points.append((trade.exit_time, equity))
+
+            self._equity_curve = pd.Series(
+                [p[1] for p in equity_points],
+                index=[p[0] for p in equity_points]
+            )
+            return self._equity_curve
+
+        except Exception as e:
+            self.logger.error(f"Failed to generate equity curve: {str(e)}")
+            return pd.Series()
 
     def get_trade_history(
         self,
