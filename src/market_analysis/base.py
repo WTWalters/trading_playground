@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import logging
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 # Type variables for generic types
 T = TypeVar('T')
@@ -33,36 +33,100 @@ class MarketRegime(Enum):
 class AnalysisConfig(BaseModel):
     """Configuration settings for market analysis"""
 
+    # Pydantic V2 configuration
+    model_config = ConfigDict(
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+        extra="allow"
+    )
+
     # Time windows
-    volatility_window: int = Field(default=20, ge=5, le=100)
-    trend_window: int = Field(default=20, ge=5, le=100)
-    momentum_window: int = Field(default=14, ge=5, le=50)
+    volatility_window: int = Field(
+        default=20,
+        ge=5,
+        le=100,
+        description="Window size for volatility calculations"
+    )
+    trend_window: int = Field(
+        default=20,
+        ge=5,
+        le=100,
+        description="Window size for trend calculations"
+    )
+    momentum_window: int = Field(
+        default=14,
+        ge=5,
+        le=50,
+        description="Window size for momentum calculations"
+    )
 
     # Thresholds
-    trend_strength_threshold: float = Field(default=0.1, ge=0.0, le=1.0)
-    volatility_threshold: float = Field(default=0.02, ge=0.0, le=0.1)
-    momentum_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
-    outlier_std_threshold: float = Field(default=3.0, ge=1.0, le=5.0)
+    trend_strength_threshold: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Minimum threshold for trend strength"
+    )
+    volatility_threshold: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=0.1,
+        description="Threshold for volatility classification"
+    )
+    momentum_threshold: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Threshold for momentum significance"
+    )
+    outlier_std_threshold: float = Field(
+        default=3.0,
+        ge=1.0,
+        le=5.0,
+        description="Standard deviation threshold for outliers"
+    )
 
     # Data requirements
-    minimum_data_points: int = Field(default=30, ge=10, le=200)
+    minimum_data_points: int = Field(
+        default=30,
+        ge=10,
+        le=200,
+        description="Minimum required data points for analysis"
+    )
 
     # Analysis parameters
-    use_log_returns: bool = Field(default=True)
-    volatility_scaling: bool = Field(default=True)
+    use_log_returns: bool = Field(
+        default=True,
+        description="Use logarithmic returns instead of arithmetic"
+    )
+    volatility_scaling: bool = Field(
+        default=True,
+        description="Apply volatility scaling to metrics"
+    )
 
-    @validator('trend_window')
-    def validate_trend_window(cls, v, values):
+    # Analysis window for backtest
+    analysis_window: int = Field(
+        default=100,
+        ge=20,
+        le=500,
+        description="Window size for analysis in backtesting"
+    )
+
+    @field_validator('trend_window')
+    @classmethod
+    def validate_trend_window(cls, v: int, info) -> int:
         """Ensure trend window is appropriate"""
-        if 'volatility_window' in values and v < values['volatility_window']:
+        if 'volatility_window' in info.data and v < info.data['volatility_window']:
             raise ValueError("Trend window should be >= volatility window")
         return v
 
-    class Config:
-        """Pydantic model configuration"""
-        validate_assignment = True
-        arbitrary_types_allowed = True
-        extra = "allow"
+    @field_validator('analysis_window')
+    @classmethod
+    def validate_analysis_window(cls, v: int, info) -> int:
+        """Ensure analysis window is appropriate"""
+        if v < info.data.get('trend_window', 20):
+            raise ValueError("Analysis window must be >= trend window")
+        return v
 
 class BaseMetrics(Protocol):
     """Protocol for metrics classes"""
