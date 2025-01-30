@@ -1,14 +1,8 @@
 """
-GARCH modeling module for volatility analysis.
-
-This module implements various GARCH models for volatility forecasting:
-- GARCH(1,1)
-- EGARCH for leverage effects
-- GJR-GARCH for asymmetric volatility
-- Component GARCH for long/short-term volatility
+GARCH model implementation with robust parameter estimation.
 """
 
-from typing import Optional, Tuple, Dict
+from typing import Dict, Optional, Union, Tuple
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
@@ -18,126 +12,176 @@ from dataclasses import dataclass
 @dataclass
 class GARCHModel:
     """
-    GARCH model implementation with maximum likelihood estimation.
+    GARCH model with robust parameter estimation.
     
-    Attributes:
-        returns (pd.Series): Return series for modeling
-        model_type (str): Type of GARCH model ('standard', 'egarch', 'gjr', 'component')
+    Uses variance targeting for initialization and
+    bounded optimization for numerical stability.
     """
     
     returns: pd.Series
     model_type: str = 'standard'
-    
+        
     def __post_init__(self):
-        """Initialize model parameters and validate inputs."""
-        self.validate_data()
+        """Initialize model state."""
+        self._validate_data()
         self.parameters = None
         self.volatility = None
         self.residuals = None
         
-    def validate_data(self) -> None:
-        """Validate input data requirements."""
+    def _validate_data(self) -> None:
+        """Validate input requirements."""
         if not isinstance(self.returns, pd.Series):
-            raise TypeError("Returns must be a pandas Series")
+            raise TypeError("Returns must be pandas Series")
+            
+        if len(self.returns) < 252:  # At least one year of data
+            raise ValueError("Insufficient data for GARCH estimation")
             
         if not np.isfinite(self.returns).all():
             raise ValueError("Returns contain non-finite values")
             
-        valid_models = {'standard', 'egarch', 'gjr', 'component'}
-        if self.model_type not in valid_models:
-            raise ValueError(f"Invalid model type. Must be one of {valid_models}")
-    
     def _initialize_parameters(self) -> np.ndarray:
-        """Initialize GARCH parameters with reasonable values."""
+        """Initialize parameters using variance targeting."""
+        unconditional_var = self.returns.var()
+        
         if self.model_type == 'standard':
-            # [omega, alpha, beta]
-            return np.array([0.001, 0.1, 0.8])
+            # Target long-run variance
+            alpha_init = 0.05
+            beta_init = 0.90
+            omega_init = unconditional_var * (1 - alpha_init - beta_init)
+            return np.array([omega_init, alpha_init, beta_init])
+            
         elif self.model_type == 'egarch':
-            # [omega, alpha, gamma, beta]
-            return np.array([0.001, 0.1, 0.0, 0.8])
+            return np.array([
+                np.log(unconditional_var),  # omega
+                0.05,  # alpha
+                -0.05,  # gamma
+                0.90   # beta
+            ])
+            
         elif self.model_type == 'gjr':
-            # [omega, alpha, gamma, beta]
-            return np.array([0.001, 0.05, 0.05, 0.8])
+            alpha_init = 0.05
+            gamma_init = 0.05
+            beta_init = 0.85
+            omega_init = unconditional_var * (1 - alpha_init - gamma_init/2 - beta_init)
+            return np.array([omega_init, alpha_init, gamma_init, beta_init])
+            
         else:  # component
-            # [omega, alpha, beta, phi, rho]
-            return np.array([0.001, 0.1, 0.8, 0.01, 0.97])
-    
+            return np.array([
+                unconditional_var * 0.05,  # omega
+                0.05,  # alpha
+                0.85,  # beta
+                0.01,  # phi
+                0.97   # rho
+            ])
+            
     def _constraint_maker(self) -> list:
-        """Create parameter constraints based on model type."""
+        """Create parameter constraints with bounds."""
         if self.model_type == 'standard':
-            # Ensure stationarity and positive variance
-            def constraint1(params):
-                return 1 - params[1] - params[2]  # alpha + beta < 1
-            def constraint2(params):
-                return params[0]  # omega > 0
-                
-            return [
-                {'type': 'ineq', 'fun': constraint1},
-                {'type': 'ineq', 'fun': constraint2}
-            ]
-        elif self.model_type in {'egarch', 'gjr'}:
-            # Persistence constraint
-            def constraint1(params):
-                return 1 - params[1] - params[3]  # alpha + beta < 1
-                
-            return [{'type': 'ineq', 'fun': constraint1}]
-        else:  # component
-            def constraint1(params):
-                return 1 - params[1] - params[2]  # alpha + beta < 1
-            def constraint2(params):
-                return 1 - params[4]  # rho < 1
-                
-            return [
-                {'type': 'ineq', 'fun': constraint1},
-                {'type': 'ineq', 'fun': constraint2}
-            ]
-    
+            return [{
+                'type': 'ineq',
+                'fun': lambda x: 1 - x[1] - x[2]  # alpha + beta < 1
+            }, {
+                'type': 'ineq',
+                'fun': lambda x: x[0]  # omega > 0
+            }, {
+                'type': 'ineq',
+                'fun': lambda x: x[1]  # alpha > 0
+            }, {
+                'type': 'ineq',
+                'fun': lambda x: x[2]  # beta > 0
+            }]
+            
+        elif self.model_type == 'egarch':
+            return [{
+                'type': 'ineq',
+                'fun': lambda x: 1 - abs(x[3])  # |beta| < 1
+            }]
+            
+        elif self.model_type == 'gjr':
+            return [{
+                'type': 'ineq',
+                'fun': lambda x: 1 - x[1] - x[2]/2 - x[3]  # alpha + gamma/2 + beta < 1
+            }, {
+                'type': 'ineq',
+                'fun': lambda x: x[0]  # omega > 0
+            }]
+            
+        else:
+            raise NotImplementedError(f"Constraints for {self.model_type} not implemented")
+            
     def _garch_variance(self, params: np.ndarray, returns: np.ndarray) -> np.ndarray:
-        """Calculate GARCH variances based on model type."""
+        """Calculate GARCH variances with numerical safeguards."""
         T = len(returns)
-        variance = np.zeros(T)
-        variance[0] = np.var(returns)
+        EPS = 1e-6  # Small constant to prevent numerical issues
+        
+        variance = np.full(T, returns.var())
         
         if self.model_type == 'standard':
             omega, alpha, beta = params
+            
             for t in range(1, T):
-                variance[t] = omega + alpha * returns[t-1]**2 + beta * variance[t-1]
+                # Add small constant to prevent zero variance
+                variance[t] = max(
+                    omega + alpha * returns[t-1]**2 + beta * variance[t-1],
+                    EPS
+                )
                 
         elif self.model_type == 'egarch':
             omega, alpha, gamma, beta = params
-            log_var = np.log(np.ones(T) * np.var(returns))
+            log_var = np.full(T, np.log(variance[0]))
+            
             for t in range(1, T):
-                z = returns[t-1] / np.sqrt(np.exp(log_var[t-1]))
+                rt = returns[t-1]
+                ht = np.exp(log_var[t-1])
+                z = rt / np.sqrt(ht + EPS)
+                
                 log_var[t] = omega + alpha * (abs(z) - np.sqrt(2/np.pi)) + gamma * z + beta * log_var[t-1]
+                # Prevent extreme values
+                log_var[t] = np.clip(log_var[t], -20, 20)
+                
             variance = np.exp(log_var)
             
         elif self.model_type == 'gjr':
             omega, alpha, gamma, beta = params
+            
             for t in range(1, T):
-                leverage = returns[t-1] < 0
-                variance[t] = omega + (alpha + gamma * leverage) * returns[t-1]**2 + beta * variance[t-1]
-                
-        else:  # component
-            omega, alpha, beta, phi, rho = params
-            q = np.var(returns) * np.ones(T)  # long-term component
-            for t in range(1, T):
-                q[t] = omega + rho * (q[t-1] - omega) + phi * (returns[t-1]**2 - q[t-1])
-                variance[t] = q[t] + alpha * (returns[t-1]**2 - q[t-1]) + beta * (variance[t-1] - q[t-1])
+                rt = returns[t-1]
+                leverage = rt < 0
+                variance[t] = max(
+                    omega + (alpha + gamma * leverage) * rt**2 + beta * variance[t-1],
+                    EPS
+                )
                 
         return variance
-    
+        
     def _log_likelihood(self, params: np.ndarray) -> float:
-        """Calculate negative log-likelihood for optimization."""
-        variance = self._garch_variance(params, self.returns.values)
-        ll = -0.5 * np.sum(np.log(variance) + self.returns.values**2 / variance)
-        return -ll  # Minimize negative log-likelihood
-    
+        """Calculate log-likelihood with numerical stability."""
+        EPS = 1e-10  # Small constant for numerical stability
+        
+        try:
+            variance = self._garch_variance(params, self.returns.values)
+            
+            # Add small constant to prevent log(0)
+            log_likelihood = -0.5 * np.sum(
+                np.log(variance + EPS) +
+                self.returns.values**2 / (variance + EPS)
+            )
+            
+            # Check for invalid values
+            if not np.isfinite(log_likelihood):
+                return np.inf
+                
+            return -log_likelihood  # Minimize negative log-likelihood
+            
+        except:
+            return np.inf
+        
     def fit(self, method: str = 'SLSQP') -> Dict[str, float]:
         """
-        Fit GARCH model using maximum likelihood estimation.
+        Fit GARCH model with robust optimization.
         
         Args:
-            method: Optimization method for scipy.optimize.minimize
+            method: Optimization method
             
         Returns:
             Dict[str, float]: Fitted parameters
@@ -145,83 +189,109 @@ class GARCHModel:
         initial_params = self._initialize_parameters()
         constraints = self._constraint_maker()
         
-        result = minimize(
-            self._log_likelihood,
-            initial_params,
-            method=method,
-            constraints=constraints,
-            options={'maxiter': 1000}
-        )
+        # Multiple optimization attempts with different initializations
+        best_result = None
+        best_llh = np.inf
         
-        if not result.success:
-            raise RuntimeError(f"GARCH fitting failed: {result.message}")
+        for scale in [1.0, 0.1, 10.0]:
+            try:
+                result = minimize(
+                    self._log_likelihood,
+                    initial_params * scale,
+                    method=method,
+                    constraints=constraints,
+                    options={
+                        'maxiter': 1000,
+                        'ftol': 1e-8,
+                        'disp': False
+                    }
+                )
+                
+                if result.success and result.fun < best_llh:
+                    best_result = result
+                    best_llh = result.fun
+                    
+            except:
+                continue
+                
+        if best_result is None:
+            raise RuntimeError("GARCH fitting failed for all initializations")
             
-        self.parameters = result.x
+        self.parameters = best_result.x
         self.volatility = pd.Series(
             np.sqrt(self._garch_variance(self.parameters, self.returns.values)),
             index=self.returns.index
         )
         self.residuals = self.returns / self.volatility
         
-        # Create parameter dictionary
         param_names = {
             'standard': ['omega', 'alpha', 'beta'],
             'egarch': ['omega', 'alpha', 'gamma', 'beta'],
-            'gjr': ['omega', 'alpha', 'gamma', 'beta'],
-            'component': ['omega', 'alpha', 'beta', 'phi', 'rho']
-        }
+            'gjr': ['omega', 'alpha', 'gamma', 'beta']
+        }[self.model_type]
         
-        return dict(zip(param_names[self.model_type], self.parameters))
-    
+        return dict(zip(param_names, self.parameters))
+        
     def forecast(self, horizon: int = 1) -> Tuple[pd.Series, pd.Series]:
         """
-        Forecast volatility for specified horizon.
+        Forecast volatility with uncertainty.
         
         Args:
-            horizon: Forecast horizon in days
+            horizon: Forecast horizon
             
         Returns:
-            Tuple[pd.Series, pd.Series]: Point forecasts and forecast standard errors
+            Tuple[pd.Series, pd.Series]: Forecasts and standard errors
         """
         if self.parameters is None:
             raise RuntimeError("Model must be fit before forecasting")
             
-        last_var = self.volatility.iloc[-1] ** 2
+        last_var = self.volatility.iloc[-1]**2
+        last_return = self.returns.iloc[-1]
+        
+        # Initialize forecasts
         forecasts = np.zeros(horizon)
         std_errs = np.zeros(horizon)
         
         if self.model_type == 'standard':
             omega, alpha, beta = self.parameters
+            persistence = alpha + beta
+            unconditional_var = omega / (1 - persistence)
+            
             for h in range(horizon):
-                forecasts[h] = omega + (alpha + beta) * last_var
-                last_var = forecasts[h]
-                # Approximation of forecast standard errors
-                std_errs[h] = np.sqrt(forecasts[h]) * np.sqrt(h + 1) / np.sqrt(252)
+                if h == 0:
+                    forecasts[h] = omega + alpha * last_return**2 + beta * last_var
+                else:
+                    forecasts[h] = omega + (alpha + beta) * forecasts[h-1]
+                    
+                # Include parameter uncertainty in standard errors
+                std_errs[h] = np.sqrt(forecasts[h]) * np.sqrt(1 + h * persistence)
                 
         elif self.model_type == 'egarch':
             omega, alpha, gamma, beta = self.parameters
             last_log_var = np.log(last_var)
+            z_last = last_return / np.sqrt(last_var)
+            
             for h in range(horizon):
-                forecasts[h] = np.exp(omega + beta * last_log_var)
-                last_log_var = np.log(forecasts[h])
-                std_errs[h] = np.sqrt(forecasts[h]) * np.sqrt(h + 1) / np.sqrt(252)
+                if h == 0:
+                    log_var = omega + alpha * (abs(z_last) - np.sqrt(2/np.pi)) + gamma * z_last + beta * last_log_var
+                else:
+                    log_var = omega + beta * np.log(forecasts[h-1])
+                    
+                forecasts[h] = np.exp(log_var)
+                std_errs[h] = forecasts[h] * np.sqrt(1 + h * beta**2)
                 
         elif self.model_type == 'gjr':
             omega, alpha, gamma, beta = self.parameters
+            leverage_last = last_return < 0
+            
             for h in range(horizon):
-                forecasts[h] = omega + (alpha + 0.5 * gamma) * last_var + beta * last_var
-                last_var = forecasts[h]
-                std_errs[h] = np.sqrt(forecasts[h]) * np.sqrt(h + 1) / np.sqrt(252)
+                if h == 0:
+                    forecasts[h] = omega + (alpha + gamma * leverage_last) * last_return**2 + beta * last_var
+                else:
+                    forecasts[h] = omega + (alpha + gamma/2) * forecasts[h-1] + beta * forecasts[h-1]
+                    
+                std_errs[h] = np.sqrt(forecasts[h]) * np.sqrt(1 + h * (alpha + gamma/2 + beta))
                 
-        else:  # component
-            omega, alpha, beta, phi, rho = self.parameters
-            last_q = omega  # Long-term component
-            for h in range(horizon):
-                forecasts[h] = last_q + (alpha + beta) * (last_var - last_q)
-                last_var = forecasts[h]
-                last_q = omega + rho * (last_q - omega)
-                std_errs[h] = np.sqrt(forecasts[h]) * np.sqrt(h + 1) / np.sqrt(252)
-        
         dates = pd.date_range(
             start=self.returns.index[-1] + pd.Timedelta('1D'),
             periods=horizon,
@@ -232,37 +302,3 @@ class GARCHModel:
             pd.Series(np.sqrt(forecasts), index=dates),
             pd.Series(std_errs, index=dates)
         )
-    
-    def get_model_stats(self) -> pd.Series:
-        """
-        Calculate model statistics and diagnostics.
-        
-        Returns:
-            pd.Series: Model statistics
-        """
-        if self.parameters is None:
-            raise RuntimeError("Model must be fit before calculating statistics")
-            
-        stats = pd.Series({
-            'log_likelihood': -self._log_likelihood(self.parameters),
-            'aic': 2 * len(self.parameters) - 2 * -self._log_likelihood(self.parameters),
-            'bic': np.log(len(self.returns)) * len(self.parameters) - 2 * -self._log_likelihood(self.parameters),
-            'persistence': sum(self.parameters[1:3]),  # alpha + beta
-            'unconditional_vol': np.sqrt(self.parameters[0] / (1 - self.persistence)),
-            'residual_mean': self.residuals.mean(),
-            'residual_std': self.residuals.std(),
-            'residual_skew': self.residuals.skew(),
-            'residual_kurt': self.residuals.kurtosis(),
-            'ljung_box_residuals': self._ljung_box_test(self.residuals),
-            'ljung_box_squared': self._ljung_box_test(self.residuals**2)
-        })
-        
-        return stats
-    
-    @staticmethod
-    def _ljung_box_test(series: pd.Series, lags: int = 10) -> float:
-        """Calculate Ljung-Box test statistic."""
-        acf = [series.autocorr(lag=i) for i in range(1, lags + 1)]
-        n = len(series)
-        q_stat = n * (n + 2) * sum([(acf[i]**2) / (n - i - 1) for i in range(lags)])
-        return q_stat
