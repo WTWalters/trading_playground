@@ -85,31 +85,6 @@ class MarketImpact:
             if not quote_cols.issubset(set(self.quotes.columns) | {'timestamp'}):
                 raise ValueError(f"Quotes must contain columns: {quote_cols}")
 
-      def calculate_permanent_impact(self, window: str = '1D') -> pd.Series:
-        """
-        Calculate permanent price impact of trades.
-
-        Args:
-          window: Time window for calculation
-
-        Returns:
-        pd.Series: Permanent impact estimates
-        """
-        price_changes = self.trades['price'].pct_change()
-        volume_signed = self.trades['volume'] * np.sign(price_changes)
-
-        def estimate_permanent(group):
-          if len(group) < 2:
-            return np.nan
-          return (group['price_change'] * group['volume_signed']).mean()
-
-        analysis_df = pd.DataFrame({
-          'price_change': price_changes,
-          'volume_signed': volume_signed
-        }, index=self.trades.index)
-
-    return analysis_df.resample(window).apply(estimate_permanent) * 10000  # Convert to bps
-
     def _calculate_base_metrics(self) -> None:
         """
         Calculate base metrics for impact modeling.
@@ -135,6 +110,31 @@ class MarketImpact:
             self.avg_spread = (self.quotes['ask'] - self.quotes['bid']).mean()
         else:
             self.avg_spread = None
+
+    def calculate_permanent_impact(self, window: str = '1D') -> pd.Series:
+        """
+        Calculate permanent price impact of trades.
+
+        Args:
+            window: Time window for calculation
+
+        Returns:
+            pd.Series: Permanent impact estimates in basis points
+        """
+        price_changes = self.trades['price'].pct_change()
+        volume_signed = self.trades['volume'] * np.sign(price_changes)
+
+        def estimate_permanent(group):
+            if len(group) < 2:
+                return np.nan
+            return (group['price_change'] * group['volume_signed']).mean()
+
+        analysis_df = pd.DataFrame({
+            'price_change': price_changes,
+            'volume_signed': volume_signed
+        }, index=self.trades.index)
+
+        return analysis_df.resample(window).apply(estimate_permanent) * 10000
 
     def calculate_square_root_impact(self, trade_size: float,
                                    participation_rate: float) -> float:
@@ -184,7 +184,7 @@ class MarketImpact:
             float: Estimated price impact in basis points
         """
         impact_coefficient = self._estimate_impact_coefficient()
-        return impact_coefficient * trade_size * 10000  # Convert to bps
+        return impact_coefficient * trade_size * 10000
 
     def _estimate_impact_coefficient(self) -> float:
         """
@@ -250,27 +250,25 @@ class MarketImpact:
         Returns:
             float: Estimated VWAP impact in basis points
         """
-        # Calculate VWAP for specified interval
         try:
-               vwap = (
-                   (self.trades['price'] * self.trades['volume']).resample(interval).sum() /
-                   self.trades['volume'].resample(interval).sum()
-               ).fillna(method='ffill')
+            vwap = (
+                (self.trades['price'] * self.trades['volume']).resample(interval).sum() /
+                self.trades['volume'].resample(interval).sum()
+            ).fillna(method='ffill')
 
-               size_filter = (
-                   (self.trades['volume'] > 0.8 * trade_size) &
-                   (self.trades['volume'] < 1.2 * trade_size)
-               )
-               similar_trades = self.trades[size_filter]
+            size_filter = (
+                (self.trades['volume'] > 0.8 * trade_size) &
+                (self.trades['volume'] < 1.2 * trade_size)
+            )
+            similar_trades = self.trades[size_filter]
 
-               if similar_trades.empty:
-                   return self.calculate_square_root_impact(trade_size, 0.1)
+            if similar_trades.empty:
+                return self.calculate_square_root_impact(trade_size, 0.1)
 
-               vwap_impacts = (similar_trades['price'] / vwap - 1).abs() * 10000
-               return vwap_impacts.mean()
+            vwap_impacts = (similar_trades['price'] / vwap - 1).abs() * 10000
+            return vwap_impacts.mean()
         except Exception:
             return self.calculate_square_root_impact(trade_size, 0.1)
-
 
     def calculate_toxicity_metrics(self) -> Dict[str, float]:
         """
@@ -282,7 +280,13 @@ class MarketImpact:
         - Trade size distribution metrics
 
         Returns:
-            Dict containing calculated metrics
+            Dict containing:
+                - order_flow_imbalance: Float (-1 to 1)
+                - size_mean: Float
+                - size_std: Float
+                - size_skew: Float
+                - large_trade_ratio: Float (0 to 1)
+                - vpin: Float (0 to 1) if direction available
         """
         metrics = {}
 
@@ -319,7 +323,6 @@ class MarketImpact:
         Returns:
             float: VPIN estimate between 0 and 1
         """
-        # Sort trades by time and calculate volume buckets
         bucket_volume = self.trades['volume'].sum() / n_buckets
 
         current_bucket = []
@@ -343,5 +346,4 @@ class MarketImpact:
                 current_bucket = []
                 current_volume = 0
 
-        # VPIN is average of bucket imbalances
         return np.mean(bucket_imbalances) if bucket_imbalances else 0.0
