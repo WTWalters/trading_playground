@@ -7,7 +7,7 @@ class DatabaseConfig(BaseSettings):
     host: str = 'localhost'
     port: int = 5432
     database: str = 'trading'
-    user: str = 'whitneywalters'  # Updated to use your username
+    user: str = 'whitneywalters'  # Default to current user, override in environment
     password: str = ''  # Empty string for passwordless auth
     min_connections: int = 1
     max_connections: int = 10
