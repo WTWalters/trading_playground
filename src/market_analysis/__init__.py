@@ -7,5 +7,9 @@ and statistical validation.
 """
 
 from . import time_series
+from .simple_backtest import SimpleBacktest
 
-__all__ = ['time_series']
+__all__ = [
+    'time_series',
+    'SimpleBacktest'
+]

@@ -184,6 +184,9 @@ class DatabaseManager:
             # Get interval for timeframe
             interval = self._get_interval(timeframe)
             
+            # Debug logging
+            self.logger.info(f"Querying market data for {symbol} from {start_date} to {end_date} with source={source}")
+            
             query = f"""
                 SELECT time, open, high, low, close, volume
                 FROM market_data
@@ -196,13 +199,33 @@ class DatabaseManager:
             if source:
                 query += " AND source = $4"
                 params.append(source)
+                self.logger.debug(f"Using source filter: {source}")
                 
             query += " ORDER BY time ASC"
             
+            # Debug the query
+            debug_query = query
+            for i, param in enumerate(params):
+                placeholder = f"${i+1}"
+                debug_query = debug_query.replace(placeholder, f"'{param}'")
+            self.logger.debug(f"Query: {debug_query}")
+            
             async with self.pool.acquire() as conn:
-                records = await conn.fetch(query, *params)
+                # Check available data in the table for the symbol
+                check_query = f"SELECT COUNT(*) FROM market_data WHERE symbol = $1"
+                count_result = await conn.fetchval(check_query, symbol)
+                self.logger.info(f"Total records for {symbol} in database: {count_result}")
                 
+                if source:
+                    check_source_query = f"SELECT COUNT(*) FROM market_data WHERE symbol = $1 AND source = $2"
+                    source_count = await conn.fetchval(check_source_query, symbol, source)
+                    self.logger.info(f"Records for {symbol} with source '{source}': {source_count}")
+                
+                # Execute the main query
+                records = await conn.fetch(query, *params)
+            
             if not records:
+                self.logger.warning(f"No records found for {symbol} with the specified criteria")
                 return pd.DataFrame()
                 
             # Convert to DataFrame

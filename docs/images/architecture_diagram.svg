@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 800" width="1000" height="800">
+  <!-- Background -->
+  <rect width="1000" height="800" fill="#f9f9f9" />
+  
+  <!-- Title -->
+  <text x="500" y="50" font-family="Arial" font-size="28" font-weight="bold" text-anchor="middle">TITAN Trading System Architecture</text>
+
+  <!-- Data Infrastructure Layer -->
+  <rect x="150" y="100" width="700" height="120" rx="10" ry="10" fill="#e1f5fe" stroke="#01579b" stroke-width="2" />
+  <text x="500" y="140" font-family="Arial" font-size="22" font-weight="bold" text-anchor="middle">Data Infrastructure</text>
+  
+  <!-- Data Infrastructure Components -->
+  <rect x="190" y="160" width="140" height="40" rx="5" ry="5" fill="#b3e5fc" stroke="#0288d1" stroke-width="1" />
+  <text x="260" y="185" font-family="Arial" font-size="14" text-anchor="middle">Data Providers</text>
+  
+  <rect x="350" y="160" width="140" height="40" rx="5" ry="5" fill="#b3e5fc" stroke="#0288d1" stroke-width="1" />
+  <text x="420" y="185" font-family="Arial" font-size="14" text-anchor="middle">Ingestion Pipeline</text>
+  
+  <rect x="510" y="160" width="140" height="40" rx="5" ry="5" fill="#b3e5fc" stroke="#0288d1" stroke-width="1" />
+  <text x="580" y="185" font-family="Arial" font-size="14" text-anchor="middle">TimescaleDB</text>
+  
+  <rect x="670" y="160" width="140" height="40" rx="5" ry="5" fill="#b3e5fc" stroke="#0288d1" stroke-width="1" />
+  <text x="740" y="185" font-family="Arial" font-size="14" text-anchor="middle">Data Validation</text>
+
+  <!-- Market Analysis Layer -->
+  <rect x="150" y="250" width="700" height="120" rx="10" ry="10" fill="#f3e5f5" stroke="#4a148c" stroke-width="2" />
+  <text x="500" y="290" font-family="Arial" font-size="22" font-weight="bold" text-anchor="middle">Market Analysis</text>
+  
+  <!-- Market Analysis Components -->
+  <rect x="170" y="310" width="120" height="40" rx="5" ry="5" fill="#e1bee7" stroke="#8e24aa" stroke-width="1" />
+  <text x="230" y="335" font-family="Arial" font-size="13" text-anchor="middle">Cointegration</text>
+  
+  <rect x="300" y="310" width="120" height="40" rx="5" ry="5" fill="#e1bee7" stroke="#8e24aa" stroke-width="1" />
+  <text x="360" y="335" font-family="Arial" font-size="13" text-anchor="middle">Mean Reversion</text>
+  
+  <rect x="430" y="310" width="120" height="40" rx="5" ry="5" fill="#e1bee7" stroke="#8e24aa" stroke-width="1" />
+  <text x="490" y="335" font-family="Arial" font-size="13" text-anchor="middle">Regime Detection</text>
+  <text x="490" y="350" font-family="Arial" font-size="10" text-anchor="middle" fill="#4a148c">K-means + RF</text>
+  
+  <rect x="560" y="310" width="120" height="40" rx="5" ry="5" fill="#e1bee7" stroke="#8e24aa" stroke-width="1" />
+  <text x="620" y="335" font-family="Arial" font-size="13" text-anchor="middle">Microstructure</text>
+  
+  <rect x="690" y="310" width="120" height="40" rx="5" ry="5" fill="#e1bee7" stroke="#8e24aa" stroke-width="1" />
+  <text x="750" y="335" font-family="Arial" font-size="13" text-anchor="middle">Signal Gen</text>
+  <text x="750" y="350" font-family="Arial" font-size="10" text-anchor="middle" fill="#4a148c">LogReg Confidence</text>
+
+  <!-- Strategy Management Layer -->
+  <rect x="150" y="400" width="700" height="120" rx="10" ry="10" fill="#e8f5e9" stroke="#1b5e20" stroke-width="2" />
+  <text x="500" y="440" font-family="Arial" font-size="22" font-weight="bold" text-anchor="middle">Strategy Management</text>
+  
+  <!-- Strategy Management Components -->
+  <rect x="170" y="460" width="160" height="40" rx="5" ry="5" fill="#c8e6c9" stroke="#43a047" stroke-width="1" />
+  <text x="250" y="485" font-family="Arial" font-size="13" text-anchor="middle">Adaptive Parameter Mgr</text>
+  
+  <rect x="340" y="460" width="160" height="40" rx="5" ry="5" fill="#c8e6c9" stroke="#43a047" stroke-width="1" />
+  <text x="420" y="485" font-family="Arial" font-size="13" text-anchor="middle">Strategy Registry</text>
+  
+  <rect x="510" y="460" width="160" height="40" rx="5" ry="5" fill="#c8e6c9" stroke="#43a047" stroke-width="1" />
+  <text x="590" y="485" font-family="Arial" font-size="13" text-anchor="middle">Performance Tracker</text>
+  
+  <rect x="680" y="460" width="160" height="40" rx="5" ry="5" fill="#c8e6c9" stroke="#43a047" stroke-width="1" />
+  <text x="760" y="485" font-family="Arial" font-size="13" text-anchor="middle">Walk-Forward Framework</text>
+
+  <!-- Execution Framework Layer -->
+  <rect x="150" y="550" width="400" height="120" rx="10" ry="10" fill="#fff3e0" stroke="#e65100" stroke-width="2" />
+  <text x="350" y="590" font-family="Arial" font-size="22" font-weight="bold" text-anchor="middle">Execution Framework</text>
+  
+  <!-- Execution Framework Components -->
+  <rect x="170" y="610" width="170" height="40" rx="5" ry="5" fill="#ffe0b2" stroke="#fb8c00" stroke-width="1" />
+  <text x="255" y="635" font-family="Arial" font-size="13" text-anchor="middle">Backtester</text>
+  
+  <rect x="350" y="610" width="170" height="40" rx="5" ry="5" fill="#ffe0b2" stroke="#fb8c00" stroke-width="1" />
+  <text x="435" y="635" font-family="Arial" font-size="13" text-anchor="middle">Performance Analysis</text>
+
+  <!-- Risk Management Layer -->
+  <rect x="580" y="550" width="270" height="180" rx="10" ry="10" fill="#ffebee" stroke="#b71c1c" stroke-width="2" />
+  <text x="715" y="590" font-family="Arial" font-size="22" font-weight="bold" text-anchor="middle">Risk Management</text>
+  
+  <!-- Risk Management Components -->
+  <rect x="600" y="610" width="110" height="40" rx="5" ry="5" fill="#ffcdd2" stroke="#e53935" stroke-width="1" />
+  <text x="655" y="635" font-family="Arial" font-size="13" text-anchor="middle">Position Sizing</text>
+  <text x="655" y="650" font-family="Arial" font-size="10" text-anchor="middle" fill="#b71c1c">LinReg Kelly</text>
+  
+  <rect x="720" y="610" width="110" height="40" rx="5" ry="5" fill="#ffcdd2" stroke="#e53935" stroke-width="1" />
+  <text x="775" y="635" font-family="Arial" font-size="13" text-anchor="middle">Risk Controls</text>
+  
+  <rect x="600" y="670" width="110" height="40" rx="5" ry="5" fill="#ffcdd2" stroke="#e53935" stroke-width="1" />
+  <text x="655" y="695" font-family="Arial" font-size="13" text-anchor="middle">Stress Testing</text>
+  <text x="655" y="710" font-family="Arial" font-size="10" text-anchor="middle" fill="#b71c1c">GBM Prediction</text>
+  
+  <rect x="720" y="670" width="110" height="40" rx="5" ry="5" fill="#ffcdd2" stroke="#e53935" stroke-width="1" />
+  <text x="775" y="695" font-family="Arial" font-size="13" text-anchor="middle">Discipline Metrics</text>
+
+  <!-- Component Interactions -->
+  <!-- Data to Market Analysis -->
+  <path d="M500 220 L500 250" fill="none" stroke="#333" stroke-width="3" stroke-dasharray="1" />
+  <polygon points="500,245 495,235 505,235" fill="#333" />
+  
+  <!-- Market Analysis to Strategy -->
+  <path d="M500 370 L500 400" fill="none" stroke="#333" stroke-width="3" stroke-dasharray="1" />
+  <polygon points="500,395 495,385 505,385" fill="#333" />
+  
+  <!-- Strategy to Execution -->
+  <path d="M500 520 L350 550" fill="none" stroke="#333" stroke-width="3" stroke-dasharray="1" />
+  <polygon points="355,545 345,535 355,555" fill="#333" />
+  
+  <!-- Risk to Execution -->
+  <path d="M580 610 L550 610" fill="none" stroke="#333" stroke-width="3" />
+  <path d="M550 610 L550 610" fill="none" stroke="#333" stroke-width="3" />
+  <polygon points="555,605 545,610 555,615" fill="#333" />
+  
+  <!-- Strategy to Risk -->
+  <path d="M500 520 L715 550" fill="none" stroke="#333" stroke-width="3" stroke-dasharray="1" />
+  <polygon points="710,545 720,535 710,555" fill="#333" />
+
+  <!-- Current Implementation Status -->
+  <rect x="150" y="700" width="700" height="60" rx="5" ry="5" fill="#e0e0e0" stroke="#616161" stroke-width="1" />
+  <text x="500" y="730" font-family="Arial" font-size="16" font-weight="bold" text-anchor="middle">Current Development Focus: ML Integration, Testing, Performance Optimization (<100ms)</text>
+  <text x="500" y="750" font-family="Arial" font-size="14" text-anchor="middle">Core Components Implemented - Adding Machine Learning & Validating Against Historical Data</text>
+</svg>

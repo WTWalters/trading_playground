@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from src.market_analysis.base import AnalysisConfig, MarketRegime
-from src.market_analysis.backtest import SimpleBacktest
+from src.market_analysis.simple_backtest import SimpleBacktest
 from src.market_analysis.trade import TradeTracker, TradeDirection
 from src.market_analysis.volatility import VolatilityAnalyzer
 from src.market_analysis.trend import TrendAnalyzer

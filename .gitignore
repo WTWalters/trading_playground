@@ -58,3 +58,10 @@ htmlcov/
 
 # Documentation
 docs/_build/
+
+# LLM API keys and credentials
+.env
+.env.*
+!.env.example
+api_keys.json
+credentials/

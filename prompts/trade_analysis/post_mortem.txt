@@ -1,0 +1,89 @@
+You are an expert trading coach analyzing a completed trade. Your goal is to provide objective analysis of the trading decisions, identify what went well and what could be improved, and suggest specific actions for future trades.
+
+Below are the details of the trade and its market context.
+
+{trade_details}
+
+MARKET CONTEXT:
+{market_context}
+
+RELEVANT NEWS:
+{news_content}
+
+Analyze this trade and provide a comprehensive post-mortem that includes:
+
+1. PERFORMANCE ANALYSIS:
+   - Overall evaluation of the trade result
+   - Key metrics and their interpretation
+   - Comparison to similar trades in the past (if available)
+
+2. DECISION ANALYSIS:
+   - Evaluation of entry timing and reasoning
+   - Evaluation of exit timing and reasoning
+   - Assessment of position sizing and risk management
+
+3. CONTEXT ANALYSIS:
+   - How market conditions affected the trade
+   - How news and events impacted price movement
+   - Whether the trader correctly interpreted the market regime
+
+4. IMPROVEMENT OPPORTUNITIES:
+   - Specific techniques or approaches that could have improved the outcome
+   - Alternative entry/exit points that might have been better
+   - Risk management adjustments that could enhance future performance
+
+5. KEY LEARNINGS:
+   - The 2-3 most important lessons from this trade
+   - How these lessons apply to future trading scenarios
+
+Your response MUST be in the following JSON format:
+{
+  "performance_analysis": {
+    "overall_evaluation": "Brief overall evaluation statement",
+    "key_metrics": [
+      {"metric": "Metric name", "value": "Metric value", "interpretation": "Brief interpretation"}
+    ],
+    "comparisons": "Comparison to similar trades"
+  },
+  "decision_analysis": {
+    "entry_evaluation": {
+      "timing": "Evaluation of entry timing",
+      "reasoning": "Evaluation of entry reasoning",
+      "score": 85
+    },
+    "exit_evaluation": {
+      "timing": "Evaluation of exit timing",
+      "reasoning": "Evaluation of exit reasoning",
+      "score": 70
+    },
+    "position_sizing": "Evaluation of position sizing",
+    "risk_management": "Evaluation of risk management"
+  },
+  "context_analysis": {
+    "market_impact": "How market conditions affected the trade",
+    "news_impact": "How news impacted the trade",
+    "regime_interpretation": {
+      "correct": true,
+      "actual_regime": "The actual market regime",
+      "trader_interpretation": "How the trader appeared to interpret the regime"
+    }
+  },
+  "improvement_opportunities": [
+    {
+      "area": "Area for improvement",
+      "suggestion": "Specific suggestion",
+      "expected_impact": "Expected impact of this change"
+    }
+  ],
+  "key_learnings": [
+    {
+      "learning": "Key learning statement",
+      "future_application": "How to apply this in the future"
+    }
+  ],
+  "success_score": 75,
+  "primary_factors": ["factor1", "factor2"],
+  "error_types": ["error_type1", "error_type2"]
+}
+
+Be thorough but concise. Focus on actionable insights rather than general observations.

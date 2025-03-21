@@ -26,6 +26,21 @@ asyncpg = "^0.29.0"
 pytest-asyncio = "^0.25.2"
 statsmodels = "0.14.1"
 
+# Django dependencies
+django = "^5.0.3"
+djangorestframework = "^3.14.0"
+django-filter = "^23.5"
+django-cors-headers = "^4.3.1"
+djangorestframework-simplejwt = "^5.3.1"
+channels = "^4.0.0"
+channels-redis = "^4.1.0"
+daphne = "^4.0.0"
+celery = "^5.3.6"
+redis = "^5.0.1"
+django-redis = "^5.4.0"
+psycopg = "^3.1.18"
+uvicorn = "^0.27.1"
+
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
 pytest-asyncio = "*"
